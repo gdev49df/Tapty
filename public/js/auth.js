@@ -1,6 +1,7 @@
 // Вход и регистрация по логину и паролю.
 import { ApiError, api, auth, setSession } from './api.js';
 import { t } from './i18n.js';
+import { icon } from './icons.js';
 import { $, $$, errorText, esc, sheet, toast } from './ui.js';
 
 const LOGIN = /^[a-z0-9_.]{3,24}$/;
@@ -18,11 +19,16 @@ async function deriveKey(login, password) {
 }
 
 export function authForm(root, { onDone, note = '', mode = 'login' }) {
-  const field = (name, label, attrs, hint = '') =>
-    `<label class="field" data-field="${name}"><span>${esc(label)}</span>
-      <input class="input" name="${name}" ${attrs}>${hint ? `<small>${esc(hint)}</small>` : ''}<em></em></label>`;
+  // Набранное остаётся при переключении «Вход / Регистрация», в том числе имя, которого нет в форме входа.
+  const typed = {};
+  const field = (name, label, attrs, hint = '') => {
+    const input = `<input class="input" name="${name}" aria-label="${esc(label)}" ${attrs}>`;
+    const eye = `<button type="button" class="eye" aria-label="${esc(t('showPassword'))}">${icon('eye')}</button>`;
+    return `<label class="field" data-field="${name}"><span>${esc(label)}</span>
+      ${name === 'password' ? `<span class="pass">${input}${eye}</span>` : input}${hint ? `<small>${esc(hint)}</small>` : ''}<em></em></label>`;
+  };
 
-  const draw = (values = {}) => {
+  const draw = () => {
     const signup = mode === 'register';
     root.innerHTML = `
       <div class="auth">
@@ -41,7 +47,7 @@ export function authForm(root, { onDone, note = '', mode = 'login' }) {
           )}
           ${field(
             'password', t('fPassword'),
-            `type="password" maxlength="100" autocomplete="${signup ? 'new-password' : 'current-password'}"`,
+            `type="password" maxlength="100" autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="${signup ? 'new-password' : 'current-password'}"`,
             signup ? t('passwordRule') : ''
           )}
           <p class="form-error" role="alert"></p>
@@ -50,18 +56,33 @@ export function authForm(root, { onDone, note = '', mode = 'login' }) {
         </form>
       </div>`;
     const form = $('form', root);
-    for (const [name, value] of Object.entries(values)) if (form.elements[name]) form.elements[name].value = value;
+    for (const [name, value] of Object.entries(typed)) if (form.elements[name]) form.elements[name].value = value;
 
     $$('[data-mode]', root).forEach((b) => {
       b.onclick = () => {
         if (b.dataset.mode === mode) return;
         mode = b.dataset.mode;
-        draw({ login: form.elements.login.value, password: form.elements.password.value });
+        Object.assign(typed, Object.fromEntries(new FormData(form)));
+        draw();
       };
     });
+    const eye = $('.eye', form);
+    // Нажатие на глаз не забирает фокус у поля, поэтому клавиатура на телефоне не закрывается.
+    eye.onpointerdown = (e) => e.preventDefault();
+    eye.onclick = () => showPassword(form, form.elements.password.type === 'password');
     form.addEventListener('input', (e) => e.target.closest('[data-field]')?.classList.remove('bad'));
     form.onsubmit = submit;
   };
+
+  function showPassword(form, visible) {
+    const input = form.elements.password;
+    const { selectionStart, selectionEnd } = input;
+    input.type = visible ? 'text' : 'password';
+    if (document.activeElement === input) input.setSelectionRange(selectionStart, selectionEnd);
+    const eye = $('.eye', form);
+    eye.innerHTML = icon(visible ? 'eyeOff' : 'eye');
+    eye.setAttribute('aria-label', t(visible ? 'hidePassword' : 'showPassword'));
+  }
 
   function showError(name, text) {
     const box = $(`[data-field="${name}"]`, root);
@@ -86,6 +107,7 @@ export function authForm(root, { onDone, note = '', mode = 'login' }) {
     const button = $('.btn.wide', form);
     const errorBox = $('.form-error', form);
     errorBox.textContent = '';
+    showPassword(form, false);
     button.disabled = true;
     try {
       if (!crypto.subtle) throw new ApiError(0, 'insecure');

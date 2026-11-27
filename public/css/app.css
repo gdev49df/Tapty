@@ -329,6 +329,11 @@ body[data-page='item'] #view { padding: 0 0 32px; }
 .tabs-line button[aria-selected='true'] { background: var(--bg); color: var(--text); box-shadow: var(--shadow); }
 .auth .form { gap: 16px; }
 .field > small { display: block; margin-top: 8px; color: var(--muted); font-size: 12px; }
+.field > span.pass { position: relative; margin: 0; font-weight: 400; }
+.pass .input { padding-right: 52px; }
+.pass .input::-ms-reveal { display: none; }
+.eye { position: absolute; top: 0; right: 0; bottom: 0; display: grid; place-items: center; width: 48px; border-radius: var(--r); color: var(--muted); cursor: pointer; }
+.eye:hover { color: var(--text); }
 [data-field].bad > small { display: none; }
 
 /* ---------- чаты ---------- */
