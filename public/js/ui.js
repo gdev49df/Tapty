@@ -1,6 +1,6 @@
 import { icon } from './icons.js';
 import { lang, label, t } from './i18n.js';
-import { favorites } from './store.js';
+import { favorites } from './favorites.js';
 import { AREAS, CITIES } from './catalog.js';
 
 export const $ = (selector, root = document) => root.querySelector(selector);

@@ -25,6 +25,7 @@ export function setSession({ token }) {
 export function dropSession() {
   if (!auth.signedIn()) return;
   store.del('session');
+  store.del('favs');
   changed();
 }
 

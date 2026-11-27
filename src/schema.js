@@ -85,6 +85,7 @@ const STATEMENTS = [
     created_at INTEGER NOT NULL,
     PRIMARY KEY (seller, author)
   )`,
+  `CREATE TABLE IF NOT EXISTS favorites (user_id TEXT NOT NULL, listing_id INTEGER NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (user_id, listing_id))`,
   `CREATE TABLE IF NOT EXISTS blocks (blocker TEXT NOT NULL, blocked TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (blocker, blocked))`,
   // Жалоба на собеседника: модератор видит переписку, пока жалоба не разобрана.
   `CREATE TABLE IF NOT EXISTS complaints (

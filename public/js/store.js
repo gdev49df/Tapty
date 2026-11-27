@@ -22,14 +22,3 @@ export const store = {
     } catch {}
   },
 };
-
-export const favorites = {
-  list: () => store.get('fav', []),
-  has: (id) => favorites.list().includes(id),
-  toggle(id) {
-    const list = favorites.list();
-    const on = !list.includes(id);
-    store.set('fav', on ? [id, ...list].slice(0, 60) : list.filter((x) => x !== id));
-    return on;
-  },
-};

@@ -237,7 +237,8 @@ try {
     assert.ok(!JSON.stringify(one.data).includes('77011234567'));
     const contact = await call(`/api/listings/${id}/contact`, { method: 'POST' });
     assert.equal(contact.data.phone, '77011234567');
-    assert.equal(contact.data.telegram, 'aliya_kz');
+    assert.equal(contact.data.telegram, '');
+    assert.equal((await call(`/api/listings/${id}/contact`, { token: bob, method: 'POST' })).data.telegram, 'aliya_kz');
   });
 
   await test('поиск по-русски без учёта регистра и ё, фильтры, сортировка', async () => {
@@ -672,6 +673,36 @@ try {
     assert.deepEqual(await hint({ cond: 'new' }), { count: 1, low: 80000, high: 80000, typical: 0, otherCondition: false });
     assert.deepEqual(await hint({ cat: 'x' }), { count: 0 });
     assert.deepEqual(await hint({ title: '!!!' }), { count: 0 });
+  });
+
+  await test('без аккаунта нельзя лайкать и писать', async () => {
+    const [owner, fan, other] = [await enter('Хозяин'), await enter('Поклонник'), await enter('Другой')];
+    const mk = (title) => create(owner, { title, phone: '77080000001' });
+    const [one, two] = [await mk('Лампа настольная'), await mk('Стол письменный')];
+    const fav = (token, path = '', method = 'GET', body) => call(`/api/favorites${path}`, { token, method, body });
+    for (const token of [undefined, key()]) {
+      for (const r of [await fav(token), await fav(token, `/${one}`, 'PUT'), await fav(token, `/${one}`, 'DELETE'), await fav(token, '', 'POST', { ids: [one] })]) {
+        assert.equal(r.status, 401);
+        assert.equal(r.data.error, 'login_required');
+      }
+      assert.equal((await call(`/api/listings/${one}/chat`, { token, method: 'POST', body: { text: 'Привет' } })).data.error, 'login_required');
+      const contact = (await call(`/api/listings/${one}/contact`, { token, method: 'POST' })).data;
+      assert.deepEqual(contact, { phone: '77080000001', whatsapp: false, telegram: '', locked: true, name: 'Алия' });
+    }
+    const open = (await call(`/api/listings/${one}/contact`, { token: fan, method: 'POST' })).data;
+    assert.deepEqual([open.whatsapp, open.telegram, open.locked], [true, 'aliya_kz', false]);
+
+    assert.deepEqual((await fav(fan)).data, { ids: [] });
+    assert.deepEqual((await fav(fan, `/${one}`, 'PUT')).data.ids, [one]);
+    assert.deepEqual((await fav(fan, `/${one}`, 'PUT')).data.ids, [one]);
+    assert.deepEqual((await fav(fan, '/999999', 'PUT')).data.ids, [one]);
+    assert.deepEqual((await fav(other)).data.ids, []);
+    // перенос отметок с устройства: мусор и несуществующие номера отбрасываются
+    const moved = (await fav(other, '', 'POST', { ids: [two, 'x', -1, 999999, one, two] })).data.ids;
+    assert.deepEqual(moved, [two, one]);
+    assert.deepEqual((await fav(other, `/${two}`, 'DELETE')).data.ids, [one]);
+    await call(`/api/listings/${one}`, { token: owner, method: 'DELETE' });
+    assert.deepEqual([(await fav(fan)).data.ids, (await fav(other)).data.ids], [[], []]);
   });
 
   console.log(`\nвсе проверки пройдены: ${passed}`);

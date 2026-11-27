@@ -1,13 +1,13 @@
-import { api } from '../api.js';
-import { withAuth } from '../auth.js';
+import { api, auth } from '../api.js';
+import { authSheet, withAuth } from '../auth.js';
 import { CATEGORIES, REPORT_REASONS } from '../catalog.js';
 import { icon } from '../icons.js';
 import { adsCount, label, reviewsCount, t, viewsCount } from '../i18n.js';
-import { favorites } from '../store.js';
+import { favorites } from '../favorites.js';
 import { openViewer } from '../viewer.js';
 import { $, $$, areaName, cardHtml, cityName, copyText, dateText, emptyState, errorText, esc, initial, money, phoneText, placeText, priceText, ratingText, sheet, sinceText, stars, toast, verifiedBadge, wasCheaper } from '../ui.js';
 
-export default async function itemPage({ root, params, alive, back, go }) {
+export default async function itemPage({ root, params, alive, back, go, rerender }) {
   const id = Number(params[0]);
   root.innerHTML = '<div class="item"><div class="gallery skel-block"></div></div>';
 
@@ -91,7 +91,12 @@ export default async function itemPage({ root, params, alive, back, go }) {
         </div>
         <div class="item-more">
           ${
-            canWrite
+            canWrite && !auth.signedIn()
+              ? `<section class="write"><h2>${esc(t('writeSeller'))}</h2>
+                  <p class="muted">${esc(t('authChat'))}</p>
+                  <button type="button" class="btn" data-login>${esc(t('loginToWrite'))}</button>
+                </section>`
+              : canWrite
               ? `<section class="write"><h2>${esc(t('writeSeller'))}</h2>
                   <p class="muted">${esc(t('messageNote'))}</p>
                   <form class="write-row">
@@ -185,6 +190,9 @@ export default async function itemPage({ root, params, alive, back, go }) {
   } else actions.remove();
 
   $('.g-back', root).onclick = back;
+  // После входа страница перерисовывается уже с полем сообщения.
+  const askLogin = (then) => authSheet({ note: t('authChat'), onDone: () => alive() && (then ? then() : rerender()) });
+  $('[data-login]', root)?.addEventListener('click', () => askLogin());
   $('[data-same]', root)?.addEventListener('click', () =>
     $('.same', root).scrollIntoView({ block: 'start', behavior: 'smooth' })
   );
@@ -229,7 +237,7 @@ export default async function itemPage({ root, params, alive, back, go }) {
       throw e;
     }));
 
-  $('[data-contact]', root)?.addEventListener('click', async () => {
+  const openContact = async () => {
     const s = sheet('<p class="muted">…</p>', { title: item.name });
     try {
       const c = await contact();
@@ -239,14 +247,24 @@ export default async function itemPage({ root, params, alive, back, go }) {
           <a class="btn" href="tel:+${c.phone}">${icon('phone')}${esc(t('call'))}</a>
           ${c.whatsapp ? `<a class="btn ghost" href="${esc(waLink(c.phone))}" target="_blank" rel="noopener">${icon('chat')}WhatsApp</a>` : ''}
           ${c.telegram ? `<a class="btn ghost" href="https://t.me/${esc(c.telegram)}" target="_blank" rel="noopener">${icon('send')}Telegram</a>` : ''}
+          ${c.locked ? `<button class="btn ghost" data-write>${icon('chat')}${esc(t('loginToWrite'))}</button>` : ''}
           <button class="btn ghost" data-copy>${icon('copy')}${esc(t('copyNumber'))}</button>
         </div>
         <p class="safety">${icon('shield')}<span>${esc(t('safety'))}</span></p>`;
       $('[data-copy]', s.body).onclick = () => copyText(`+${c.phone}`);
+      $('[data-write]', s.body)?.addEventListener('click', () => {
+        s.close();
+        // страница и контакты запрашиваются заново, уже от вошедшего
+        askLogin(async () => {
+          await rerender();
+          $('[data-contact]')?.click();
+        });
+      });
     } catch (e) {
       s.body.innerHTML = `<p>${esc(errorText(e))}</p>`;
     }
-  });
+  };
+  $('[data-contact]', root)?.addEventListener('click', openContact);
 
   // Сообщение уходит в чат на сайте, и открывается сама переписка.
   const sendToChat = async (text) => {
@@ -282,9 +300,16 @@ export default async function itemPage({ root, params, alive, back, go }) {
       }
     };
   };
-  $('[data-offer]', root)?.addEventListener('click', () => withAuth(t('authChat'), openOffer));
+  $('[data-offer]', root)?.addEventListener('click', () => {
+    if (auth.signedIn()) openOffer();
+    else askLogin(async () => {
+      await rerender();
+      $('[data-offer]')?.click();
+    });
+  });
 
-  const write = $('.write', root);
+  // У гостя вместо поля сообщения стоит кнопка входа.
+  const write = $('.write-row', root)?.closest('.write');
   if (write) {
     const field = $('input', write);
     const send = $('[data-send]', write);

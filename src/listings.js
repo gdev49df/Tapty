@@ -239,11 +239,19 @@ export async function getListing(env, ctx, id, { owner, ip }) {
   return json({ item: { ...detail(row), mine, chat: row.owner.startsWith('u:') }, seller, same, similar: more });
 }
 
-export async function getContact(env, id, { ip }) {
+// Номер для звонка виден всем, а ссылки, чтобы написать, — только вошедшим.
+export async function getContact(env, id, { ip, user }) {
   await limit(env, `contact:${ip}`, 120, 3600);
   const row = await findRow(env, id);
   if (publicStatus(row) !== 'active') fail(410, 'not_active');
-  return json({ phone: row.phone, whatsapp: Boolean(row.whatsapp), telegram: row.telegram, name: row.name });
+  return json({
+    phone: row.phone,
+    whatsapp: Boolean(user && row.whatsapp),
+    telegram: user ? row.telegram : '',
+    // гостю сообщаем только то, что написать будет можно после входа
+    locked: !user && Boolean(row.whatsapp || row.telegram),
+    name: row.name,
+  });
 }
 
 export async function listMine(env, { owner }) {
@@ -392,6 +400,8 @@ export async function setStatus(request, env, id, who) {
       .bind(t + 60 * DAY, id)
       .run();
   } else if (action === 'restore' || action === 'extend') {
+    // вернуть объявление в ленту — то же, что выложить его: нужен аккаунт
+    await requireUser(env, who);
     await checkSeller(env, who.owner, row.phone, id);
     // Наверх ленты поднимаются только объявления, у которых закончился срок.
     const bump = publicStatus(row) === 'expired';
@@ -408,6 +418,7 @@ export async function removeRow(env, row) {
   await deletePhotos(env, parsePhotos(row));
   await env.DB.batch([
     env.DB.prepare('DELETE FROM reports WHERE listing_id = ?').bind(row.id),
+    env.DB.prepare('DELETE FROM favorites WHERE listing_id = ?').bind(row.id),
     env.DB.prepare('DELETE FROM listings WHERE id = ?').bind(row.id),
   ]);
 }

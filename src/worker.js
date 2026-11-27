@@ -5,6 +5,7 @@ import { servePhoto, uploadPhoto } from './photos.js';
 import { changePassword, recover, register, replaceCode, requireUser, signIn, signOut } from './auth.js';
 import * as chat from './chat.js';
 import * as reviews from './reviews.js';
+import * as favorites from './favorites.js';
 import { draftFromPhoto } from './ai.js';
 import { CITIES } from '../public/js/catalog.js';
 
@@ -49,6 +50,14 @@ async function api(request, env, ctx, url) {
   if (method === 'POST' && path === '/auth/password') return changePassword(request, env, who);
   if (method === 'POST' && path === '/auth/code') return replaceCode(request, env, who);
   if (method === 'GET' && path === '/price-hint') return listings.priceHint(env, url, who);
+
+  if (path === '/favorites') {
+    if (method === 'GET') return favorites.listFavorites(env, who);
+    if (method === 'POST') return favorites.importFavorites(request, env, who);
+  }
+  if ((m = /^\/favorites\/(\d{1,12})$/.exec(path)) && (method === 'PUT' || method === 'DELETE')) {
+    return favorites.setFavorite(env, Number(m[1]), method === 'PUT', who);
+  }
 
   if (method === 'GET' && path === '/chats') return chat.listChats(env, who);
   if (method === 'GET' && path === '/chats/unread') return chat.unread(env, who);

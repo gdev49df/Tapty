@@ -1,8 +1,10 @@
 import { lang, t } from './i18n.js';
-import { favorites } from './store.js';
+import { favorites } from './favorites.js';
+import { auth } from './api.js';
+import { authSheet } from './auth.js';
 import { header } from './header.js';
 import { icon } from './icons.js';
-import { $, closeSheet, esc, toast } from './ui.js';
+import { $, $$, closeSheet, errorText, esc, toast } from './ui.js';
 import home from './pages/home.js';
 import search from './pages/search.js';
 import item from './pages/item.js';
@@ -109,13 +111,42 @@ async function render({ restored = false } = {}) {
   if (id === turn) window.scrollTo(0, restore);
 }
 
+function paintHearts() {
+  for (const heart of $$('[data-fav]')) {
+    const on = favorites.has(Number(heart.dataset.fav));
+    heart.setAttribute('aria-pressed', on);
+    heart.setAttribute('aria-label', t(on ? 'fromFav' : 'toFav'));
+  }
+}
+addEventListener('tapty:fav', paintHearts);
+
+const syncFavorites = () => favorites.sync().catch(() => {});
+// вход подтягивает избранное аккаунта, выход гасит сердечки
+addEventListener('tapty:auth', () => {
+  paintHearts();
+  syncFavorites();
+});
+
+const like = (id, on) => favorites.set(id, on).catch((e) => toast(errorText(e)));
+
 document.addEventListener('click', (e) => {
   const heart = e.target.closest('[data-fav]');
   if (heart) {
     e.preventDefault();
-    const on = favorites.toggle(Number(heart.dataset.fav));
-    heart.setAttribute('aria-pressed', on);
-    heart.setAttribute('aria-label', t(on ? 'fromFav' : 'toFav'));
+    const id = Number(heart.dataset.fav);
+    if (!auth.signedIn()) {
+      authSheet({
+        note: t('authFav'),
+        onDone: () => {
+          like(id, true);
+          // на странице объявления после входа появляется поле сообщения
+          if (document.body.dataset.page === 'item') {
+            scroll.set(key, window.scrollY);
+            render();
+          }
+        },
+      });
+    } else like(id, !favorites.has(id));
     return;
   }
   const link = e.target.closest('a[href^="/"]');
@@ -148,3 +179,4 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').cat
 
 render();
 refreshUnread();
+syncFavorites();
