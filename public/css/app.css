@@ -220,6 +220,9 @@ select.input { appearance: none; -webkit-appearance: none; padding-right: 40px; 
 .seg span { display: flex; align-items: center; min-height: 40px; padding: 0 16px; border-radius: var(--r-s); background: var(--surface); border: 1px solid var(--line); font-weight: 500; pointer-events: none; }
 .seg input:checked + span { background: var(--accent); border-color: var(--accent); color: #fff; }
 .seg input:focus-visible + span { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+/* равные плашки во всю ширину, того же размера, что поля цены */
+.segs.even { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(min-content, 1fr); gap: 12px; }
+.even .seg span { justify-content: center; min-height: 48px; padding: 8px; border-radius: var(--r); font-size: 16px; text-align: center; }
 .check { display: flex; align-items: center; gap: 12px; min-height: 32px; }
 .check input { width: 20px; height: 20px; accent-color: var(--accent); flex: none; }
 .form a:not(.btn) { color: var(--accent-ink); text-decoration: underline; }
@@ -527,9 +530,23 @@ body[data-page='item'] #footer { padding-bottom: calc(104px + var(--safe-b)); }
 .sheet-body { overflow-y: auto; overscroll-behavior: contain; padding: 12px 20px calc(20px + var(--safe-b)); }
 .sheet-body > p { margin-bottom: 16px; }
 .sheet-body > .field { display: block; margin-bottom: 16px; }
-.options button { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 48px; text-align: left; border-bottom: 1px solid var(--line); }
-.options li:last-child button { border-bottom: 0; }
-.options button[aria-pressed='true'] { color: var(--accent-ink); font-weight: 600; }
+.sheet:focus { outline: none; }
+.sheet-head.worded { display: grid; grid-template-columns: 1fr auto 1fr; }
+.sheet-text { justify-self: start; min-height: 44px; padding: 0 8px; margin: 0 -8px; color: var(--text-2); font-weight: 500; }
+.sheet-text[data-close] { justify-self: end; }
+.sheet-text:disabled { color: var(--muted); opacity: .6; cursor: default; }
+.sheet-head.worded + .sheet-body { padding-bottom: 20px; }
+.sheet-foot { padding: 12px 20px calc(12px + var(--safe-b)); border-top: 1px solid var(--line); }
+/* списки выбора: рамка, выбранная строка с фоном и галочкой */
+.options, .choice { display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid var(--line); border-radius: var(--r-l); }
+.options button, .choice label { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 48px; padding: 8px 12px; border-radius: var(--r); text-align: left; }
+.options button:hover, .choice label:hover { background: var(--surface); }
+.options button[aria-pressed='true'], .choice label:has(input:checked) { background: var(--surface); }
+.choice label { position: relative; cursor: pointer; }
+.choice input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+.choice .i { visibility: hidden; }
+.choice input:checked ~ .i { visibility: visible; }
+.choice label:has(input:focus-visible) { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
 .steps li { display: flex; gap: 12px; align-items: center; padding: 12px 0; }
 .steps .i { color: var(--accent-ink); width: 24px; height: 24px; }
 @keyframes fade { from { opacity: 0; } }

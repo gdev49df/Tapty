@@ -25,7 +25,6 @@ export default async function itemPage({ root, params, alive, back, go, rerender
     return;
   }
   if (!alive()) return;
-  document.title = `${item.title} — tapty.`;
 
   const on = favorites.has(id);
   const category = CATEGORIES.find((c) => c.id === item.category);

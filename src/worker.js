@@ -162,7 +162,6 @@ async function itemPage(request, env, url, id) {
     'og:image': photo ? `${url.origin}/p/${photo}` : `${url.origin}/icons/logo-share.png`,
   };
   return new HTMLRewriter()
-    .on('title', { element: (el) => el.setInnerContent(`${row.title} — tapty.`) })
     .on('meta[property^="og:"]', {
       element: (el) => {
         const value = meta[el.getAttribute('property')];

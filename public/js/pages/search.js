@@ -1,7 +1,7 @@
 import { api } from '../api.js';
 import { CATEGORIES, CONDITIONS, PRICE_TYPES, categoryId } from '../catalog.js';
 import { icon } from '../icons.js';
-import { label, t } from '../i18n.js';
+import { label, showCount, t } from '../i18n.js';
 import { store } from '../store.js';
 import { $, areaOptions, cityOptions, emptyState, esc, feed, pick, sheet } from '../ui.js';
 
@@ -111,11 +111,17 @@ export default function search({ root, query, alive, onLeave, go, restored }) {
       [['', t('any')], ...values.map((v) => [v, t(v)])]
         .map(([v, text]) => `<label class="seg"><input type="radio" name="${name}" value="${v}"${filters[name] === v ? ' checked' : ''}><span>${esc(text)}</span></label>`)
         .join('');
+    // Список в рамке: выбранная строка выделена и отмечена галочкой.
+    const choice = (name, list) =>
+      `<div class="choice">${list
+        .map((o) => `<label><input type="radio" name="${name}" value="${o.value}"${filters[name] === o.value ? ' checked' : ''}><span>${esc(o.label)}</span>${icon('check')}</label>`)
+        .join('')}</div>`;
     const options = (list, selected) =>
       list.map((o) => `<option value="${o.value}"${selected === o.value ? ' selected' : ''}>${esc(o.label)}</option>`).join('');
     const areas = (city, selected) => options([{ value: '', label: t('anyArea') }, ...areaOptions(city)], selected);
+    let timer;
     const s = sheet(
-      `<form class="form">
+      `<form class="form" id="filters">
         <label class="field"><span>${esc(t('city'))}</span>
           <select class="input" name="city">${options([{ value: '', label: t('allKz') }, ...cityOptions()], filters.city)}</select>
         </label>
@@ -128,34 +134,73 @@ export default function search({ root, query, alive, onLeave, go, restored }) {
             <input class="input" name="max" inputmode="numeric" placeholder="${esc(t('priceTo'))}" aria-label="${esc(t('priceTo'))}" value="${esc(filters.max)}">
           </div>
         </fieldset>
-        <fieldset><legend>${esc(t('condition'))}</legend><div class="segs">${radios('cond', CONDITIONS)}</div></fieldset>
-        <fieldset><legend>${esc(t('deal'))}</legend><div class="segs">${radios('type', PRICE_TYPES)}</div></fieldset>
-        <div class="row">
-          <button type="button" class="btn ghost" data-reset>${esc(t('reset'))}</button>
-          <button class="btn">${esc(t('show'))}</button>
-        </div>
+        <fieldset><legend>${esc(t('condition'))}</legend><div class="segs even">${radios('cond', CONDITIONS)}</div></fieldset>
+        <fieldset><legend>${esc(t('deal'))}</legend>${choice('type', [{ value: '', label: t('any') }, ...PRICE_TYPES.map((v) => ({ value: v, label: t(v) }))])}</fieldset>
+        <fieldset><legend>${esc(t('sort'))}</legend>${choice('sort', sorts)}</fieldset>
       </form>`,
-      { title: t('filters') }
+      {
+        title: t('filters'),
+        reset: t('reset'),
+        foot: `<button class="btn wide" form="filters">${esc(t('show'))}</button>`,
+        onClose: () => clearTimeout(timer),
+      }
     );
     const form = $('form', s.body);
-    form.elements.city.onchange = () => {
-      const city = form.elements.city.value;
-      form.elements.area.innerHTML = areas(city, city === filters.city ? filters.area : '');
-      $('[data-area]', form).hidden = !areaOptions(city).length;
+    const submit = $('.sheet-foot .btn', s.el);
+    const reset = $('[data-reset]', s.el);
+    const chosen = () => {
+      const data = new FormData(form);
+      const next = Object.fromEntries(['city', 'area', 'cond', 'type', 'sort'].map((k) => [k, String(data.get(k) || '')]));
+      for (const k of ['min', 'max']) next[k] = String(data.get(k) || '').replace(/\D/g, '');
+      return next;
     };
+    // На кнопке — сколько объявлений найдётся с тем, что выбрано сейчас.
+    let asked = 0;
+    const count = async () => {
+      const mine = ++asked;
+      try {
+        const { total } = await api(`/listings?${new URLSearchParams({ ...filters, ...chosen() })}`);
+        if (mine === asked && submit.isConnected) submit.textContent = showCount(total);
+      } catch {
+        if (mine === asked) submit.textContent = t('show');
+      }
+    };
+    const changed = () => {
+      reset.disabled = !Object.values(chosen()).some(Boolean);
+      // пока идёт новый подсчёт, старое число не показываем
+      asked++;
+      submit.textContent = t('show');
+      clearTimeout(timer);
+      timer = setTimeout(count, 300);
+    };
+    form.addEventListener('input', changed);
+    form.addEventListener('change', (e) => {
+      if (e.target.name === 'city') {
+        const city = form.elements.city.value;
+        form.elements.area.innerHTML = areas(city, city === filters.city ? filters.area : '');
+        $('[data-area]', form).hidden = !areaOptions(city).length;
+      }
+      changed();
+    });
     form.onsubmit = (e) => {
       e.preventDefault();
-      const data = new FormData(form);
-      for (const k of ['min', 'max']) filters[k] = String(data.get(k) || '').replace(/\D/g, '');
-      for (const k of ['cond', 'type']) filters[k] = String(data.get(k) || '');
-      setCity(String(data.get('city') || ''));
-      filters.area = String(data.get('area') || '');
+      const { city, ...next } = chosen();
+      setCity(city);
+      Object.assign(filters, next);
       apply();
     };
-    $('[data-reset]', form).onclick = () => {
-      filters.min = filters.max = filters.cond = filters.type = filters.area = '';
-      setCity('');
-      apply();
+    // Очищает поля, окно остаётся открытым: применяет по-прежнему кнопка внизу.
+    reset.onclick = () => {
+      for (const field of form.querySelectorAll('input, select')) {
+        if (field.type === 'radio') field.checked = field.value === '';
+        else field.value = '';
+      }
+      form.elements.area.innerHTML = areas('', '');
+      $('[data-area]', form).hidden = true;
+      changed();
+      form.elements.city.focus();
     };
+    reset.disabled = !Object.values(chosen()).some(Boolean);
+    count();
   }
 }

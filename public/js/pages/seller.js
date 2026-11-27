@@ -28,7 +28,6 @@ export default async function seller({ root, params, alive, back, rerender }) {
   if (!alive()) return;
   const { seller: info, items, reviews } = data;
   const own = reviews.items.find((r) => r.mine);
-  document.title = `${info.name} — tapty.`;
   box.innerHTML = `
     <section class="seller-card">
       <span class="avatar" aria-hidden="true">${initial(info.name)}</span>

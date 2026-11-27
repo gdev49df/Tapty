@@ -89,18 +89,25 @@ export async function copyText(text, message = t('copied')) {
 
 let active = null;
 // Нижняя шторка (на компьютере — окно по центру).
-export function sheet(html, { title = '', onClose } = {}) {
+// reset — подпись кнопки «Сбросить»: тогда в шапке она слева, а «Закрыть» словом справа. foot — кнопка под списком.
+export function sheet(html, { title = '', onClose, reset = '', foot = '' } = {}) {
   closeSheet();
   const opener = document.activeElement;
   const wrap = document.createElement('div');
   wrap.className = 'sheet-wrap';
   wrap.innerHTML = `
-    <div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title || 'tapty.')}">
-      <div class="sheet-head">
+    <div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title || 'tapty.')}" tabindex="-1">
+      <div class="sheet-head${reset ? ' worded' : ''}">
+        ${reset ? `<button type="button" class="sheet-text" data-reset>${esc(reset)}</button>` : ''}
         <h2>${esc(title)}</h2>
-        <button class="icon-btn" data-close aria-label="${esc(t('close'))}">${icon('close')}</button>
+        ${
+          reset
+            ? `<button type="button" class="sheet-text" data-close>${esc(t('close'))}</button>`
+            : `<button class="icon-btn" data-close aria-label="${esc(t('close'))}">${icon('close')}</button>`
+        }
       </div>
       <div class="sheet-body">${html}</div>
+      ${foot ? `<div class="sheet-foot">${foot}</div>` : ''}
     </div>`;
   const onKey = (e) => {
     if (e.key === 'Escape') closeSheet();
@@ -108,7 +115,7 @@ export function sheet(html, { title = '', onClose } = {}) {
     const items = $$('a[href], button:not([disabled]), input, select, textarea', wrap);
     const first = items[0];
     const last = items.at(-1);
-    if (e.shiftKey && document.activeElement === first) (e.preventDefault(), last.focus());
+    if (e.shiftKey && (document.activeElement === first || !items.includes(document.activeElement))) (e.preventDefault(), last.focus());
     else if (!e.shiftKey && document.activeElement === last) (e.preventDefault(), first.focus());
   };
   wrap.addEventListener('click', (e) => {
@@ -124,8 +131,9 @@ export function sheet(html, { title = '', onClose } = {}) {
     opener?.focus?.({ preventScroll: true });
     onClose?.();
   };
-  $('[data-close]', wrap).focus({ preventScroll: true });
-  return { body: $('.sheet-body', wrap), close: closeSheet };
+  // В окне с «Закрыть» словом фокус получает само окно, чтобы вокруг слова не появлялась рамка.
+  $(reset ? '.sheet' : '[data-close]', wrap).focus({ preventScroll: true });
+  return { el: wrap, body: $('.sheet-body', wrap), close: closeSheet };
 }
 
 export function closeSheet() {

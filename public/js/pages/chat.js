@@ -43,7 +43,6 @@ export default async function chatPage({ root, params, alive, back, go, rerender
 
   let { chat, read, messages } = data;
   const { listing } = chat;
-  document.title = `${chat.other} — tapty.`;
   const gone = listing.status === 'gone';
   const subtitle = gone ? t('listingGone') : listing.status === 'active' ? priceText(listing) : t(`st_${listing.status}`);
   const ad = `<span class="my-photo">${listing.photo ? `<img src="/p/${listing.photo}/t" alt="">` : icon('camera')}</span>

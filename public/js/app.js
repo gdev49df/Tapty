@@ -97,7 +97,7 @@ async function render({ restored = false } = {}) {
   const isItem = page === item;
 
   document.documentElement.lang = lang();
-  document.title = 'tapty. — объявления по Казахстану';
+  document.title = 'Tapty';
   document.body.dataset.page = isItem ? 'item' : page === chatPage ? 'chat' : path === '/' ? 'home' : path === '/search' ? 'search' : '';
   chrome(tab);
   // В переписке полоса выдавила бы поле ввода за экран.

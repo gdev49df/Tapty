@@ -182,7 +182,6 @@ function block(b) {
 export default function legal({ root, params, back }) {
   const [name] = params;
   const title = t(`doc_${name}`);
-  document.title = `${title} — tapty.`;
   root.innerHTML = `
     <div class="page-head"><button class="icon-btn" data-back aria-label="${esc(t('back'))}">${icon('back')}</button><h1>${esc(title)}</h1></div>
     <div class="narrow prose doc">
