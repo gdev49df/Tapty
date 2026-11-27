@@ -26,7 +26,7 @@ export function openViewer(photos, start, title) {
   box.setAttribute('aria-label', t('viewer'));
   box.innerHTML = `
     <div class="v-track">${photos
-      .map((p, i) => `<div class="v-slide"><img src="/p/${p}" alt="${esc(title)}, ${i + 1}" draggable="false"></div>`)
+      .map((p, i) => `<div class="v-slide"><img src="${p.startsWith('blob:') ? p : `/p/${p}`}" alt="${esc(title)}, ${i + 1}" draggable="false"></div>`)
       .join('')}</div>
     <button class="round v-close" aria-label="${esc(t('close'))}">${icon('close')}</button>
     ${

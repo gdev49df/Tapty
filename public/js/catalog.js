@@ -68,6 +68,8 @@ export const AREAS = {
 export const PRICE_TYPES = ['fixed', 'bargain', 'exchange', 'free'];
 export const CONDITIONS = ['new', 'used'];
 export const REPORT_REASONS = ['fraud', 'banned', 'sold', 'wrong', 'other'];
+// Жалобы на собеседника в чате.
+export const CHAT_REASONS = ['fraud', 'spam', 'insult', 'other'];
 
 export const LIMITS = {
   photos: 6,

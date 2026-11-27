@@ -142,6 +142,49 @@ async function sameItems(env, row) {
     .map(card);
 }
 
+// Три значащие цифры: «около 183 000 ₸» читается лучше, чем «около 182 750 ₸».
+const rounded = (n) => {
+  const step = 10 ** Math.max(0, String(Math.round(n)).length - 3);
+  return Math.round(n / step) * step;
+};
+const median = (sorted) => (sorted[(sorted.length - 1) >> 1] + sorted[sorted.length >> 1]) / 2;
+
+// Подсказка при подаче: за сколько такой же товар выставляют и продают другие.
+export async function priceHint(env, url, { owner }) {
+  const p = url.searchParams;
+  const none = () => json({ count: 0 });
+  const category = p.get('cat');
+  if (!CATEGORIES.some((c) => c.id === category)) return none();
+  const sig = signature(String(p.get('title') || '').slice(0, LIMITS.titleMax));
+  const find = needles(sig);
+  if (!find.length) return none();
+  const { results } = await env.DB.prepare(
+    `SELECT title, price, condition FROM listings WHERE category = ? AND id != ? AND owner != ?
+       AND price_type IN ('fixed', 'bargain') AND price > 0 AND (status = 'sold' OR (${LIVE}))
+       AND (${find.map(() => 'instr(search, ?) > 0').join(' OR ')})
+     ORDER BY bumped_at DESC LIMIT 200`
+  )
+    .bind(category, Number(p.get('exclude')) || 0, owner || '', now(), ...find)
+    .all();
+  const matches = results.filter((r) => sameProduct(sig, signature(r.title)));
+  // Новое и подержанное стоит по-разному: смешиваем, только если в нужном состоянии ничего нет.
+  const condition = CONDITIONS.includes(p.get('cond')) ? p.get('cond') : null;
+  const alike = condition ? matches.filter((r) => r.condition === condition) : [];
+  const prices = (alike.length ? alike : matches).map((r) => r.price).sort((a, b) => a - b);
+  if (!prices.length) return none();
+  // цена в разы дальше обычной — скорее ошибка или другой товар
+  const middle = median(prices);
+  const kept = prices.filter((v) => v >= middle / 3 && v <= middle * 3);
+  if (!kept.length) return none();
+  return json({
+    count: kept.length,
+    low: kept[0],
+    high: kept.at(-1),
+    typical: kept.length > 2 ? rounded(median(kept)) : 0,
+    otherCondition: Boolean(condition) && !alike.length && matches.some((r) => r.condition),
+  });
+}
+
 // Та же категория; сначала из того же города.
 async function similar(env, row, skip) {
   const { results } = await env.DB.prepare(
@@ -268,7 +311,7 @@ async function checkPhotos(env, ids, owner, listingId) {
   if (!ids.length) return;
   const { results } = await env.DB.prepare(
     `SELECT id FROM photos WHERE id IN (${ids.map(() => '?').join(',')}) AND owner = ?
-     AND (listing_id IS NULL OR listing_id = ?)`
+     AND chat_id IS NULL AND (listing_id IS NULL OR listing_id = ?)`
   )
     .bind(...ids, owner, listingId)
     .all();
@@ -415,14 +458,20 @@ export async function adminAction(request, env, id) {
   } else if (action === 'delete') {
     await removeRow(env, row);
   } else if (action === 'ban') {
-    const t = now();
-    await env.DB.batch([
-      env.DB.prepare('INSERT OR IGNORE INTO bans (value, created_at) VALUES (?, ?)').bind(row.phone, t),
-      env.DB.prepare('INSERT OR IGNORE INTO bans (value, created_at) VALUES (?, ?)').bind(row.owner, t),
-      env.DB.prepare("UPDATE listings SET status = 'hidden', approved = 0 WHERE phone = ? OR owner = ?").bind(row.phone, row.owner),
-    ]);
+    await banSeller(env, row.owner, row.phone);
   } else fail(400, 'invalid', 'action');
   return json({ ok: true });
+}
+
+// Блокируются аккаунт и номера из его объявлений, объявления скрываются.
+export async function banSeller(env, owner, phone = '') {
+  const t = now();
+  await env.DB.batch([
+    env.DB.prepare('INSERT OR IGNORE INTO bans (value, created_at) VALUES (?, ?)').bind(owner, t),
+    env.DB.prepare('INSERT OR IGNORE INTO bans (value, created_at) SELECT DISTINCT phone, ? FROM listings WHERE owner = ?').bind(t, owner),
+    env.DB.prepare("INSERT OR IGNORE INTO bans (value, created_at) SELECT ?1, ?2 WHERE ?1 != ''").bind(phone, t),
+    env.DB.prepare("UPDATE listings SET status = 'hidden', approved = 0 WHERE owner = ?1 OR phone = ?2").bind(owner, phone),
+  ]);
 }
 
 // Фоновая уборка понемногу: черновые фото, старые счётчики, давно закрытые объявления.

@@ -33,8 +33,8 @@ export default async function chats({ root, alive, rerender, onLeave }) {
                 <span class="my-photo">${c.photo ? `<img src="/p/${c.photo}/t" alt="" loading="lazy">` : icon('camera')}</span>
                 <span class="dialog-text">
                   <span><strong>${esc(c.other)}</strong><small>${esc(when(c.at))}</small></span>
-                  <small>${esc(c.title)}</small>
-                  <span><span class="dialog-last">${c.lastMine ? `${esc(t('you'))}: ` : ''}${esc(c.last)}</span>${
+                  <small>${c.blocked ? `${esc(t('blockedTag'))}. ` : ''}${esc(c.title)}</small>
+                  <span><span class="dialog-last">${c.lastMine ? `${esc(t('you'))}: ` : ''}${esc(c.last || t('photoMessage'))}</span>${
                     c.unread ? `<b>${c.unread}</b>` : ''
                   }</span>
                 </span></a></li>`

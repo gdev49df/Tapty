@@ -1,5 +1,5 @@
 // Модерация: открывается по адресу /admin и ключу из секрета ADMIN_KEY.
-import { api } from '../api.js';
+import { api, apiBlob } from '../api.js';
 import { $, errorText, esc, phoneText, priceText, toast } from '../ui.js';
 
 let adminKey = '';
@@ -13,6 +13,7 @@ export default function admin({ root, alive }) {
         <button class="btn wide">Показать жалобы</button>
       </form>
       <div class="queue"></div>
+      <div class="chat-queue"></div>
       <div class="review-queue"></div>
     </div>`;
   const queue = $('.queue', root);
@@ -53,6 +54,63 @@ export default function admin({ root, alive }) {
     }
   });
 
+  const complaintBox = $('.chat-queue', root);
+  const reasons = { fraud: 'мошенничество', spam: 'спам', insult: 'оскорбления', other: 'другое' };
+
+  async function loadComplaints() {
+    const { items } = await api('/admin/complaints', { headers: headers() });
+    if (!alive()) return;
+    complaintBox.innerHTML = `<h2>Жалобы из чатов</h2>${
+      items.length
+        ? items
+            .map(
+              (c) => `<article class="my">
+                <p><strong>${esc(c.author)}</strong> жалуется на <strong>${esc(c.accused)}</strong>: ${esc(reasons[c.reason] || c.reason)}${c.banned ? ' (уже заблокирован)' : ''}</p>
+                <p class="muted small">Объявление: ${esc(c.title)}</p>
+                ${c.comment ? `<p class="desc">${esc(c.comment)}</p>` : ''}
+                <details><summary>Переписка</summary><ul class="log">${c.messages
+                  .map(
+                    (m) => `<li${m.accused ? ' class="accused"' : ''}><b>${esc(m.accused ? c.accused : c.author)}:</b> ${
+                      m.photo ? `<button type="button" class="btn small ghost" data-shot="${esc(m.photo)}">Показать фото</button>` : esc(m.text)
+                    }</li>`
+                  )
+                  .join('')}</ul></details>
+                <div class="my-actions">
+                  <button class="btn small ghost" data-complaint="${c.id}" data-verdict="dismiss">Отклонить жалобу</button>
+                  <button class="btn small danger" data-complaint="${c.id}" data-verdict="ban">Заблокировать пользователя</button>
+                </div>
+              </article>`
+            )
+            .join('')
+        : '<p class="muted">Жалоб из чатов нет.</p>'
+    }`;
+  }
+
+  complaintBox.addEventListener('click', async (e) => {
+    const shot = e.target.closest('[data-shot]');
+    const btn = e.target.closest('[data-complaint]');
+    try {
+      if (shot) {
+        const url = URL.createObjectURL(await apiBlob(`/admin/chat-photos/${shot.dataset.shot}`, { headers: headers() }));
+        const img = new Image();
+        img.alt = 'Фото из переписки';
+        img.onload = () => URL.revokeObjectURL(url);
+        img.src = url;
+        shot.replaceWith(img);
+      }
+      if (!btn) return;
+      if (btn.dataset.verdict === 'ban' && !btn.dataset.sure) {
+        btn.dataset.sure = '1';
+        btn.textContent = 'Точно?';
+        return;
+      }
+      await api(`/admin/complaints/${btn.dataset.complaint}`, { method: 'POST', body: { action: btn.dataset.verdict }, headers: headers() });
+      await load();
+    } catch (err) {
+      toast(errorText(err));
+    }
+  });
+
   async function load() {
     try {
       const { items } = await api('/admin/reports', { headers: headers() });
@@ -79,6 +137,7 @@ export default function admin({ root, alive }) {
             )
             .join('')
         : '<p class="muted">Жалоб нет.</p>';
+      await loadComplaints();
       await loadReviews();
     } catch (e) {
       toast(e.code === 'forbidden' ? 'Неверный ключ' : e.status === 404 ? 'Сначала задайте секрет ADMIN_KEY' : errorText(e));

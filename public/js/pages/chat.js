@@ -1,13 +1,17 @@
 // Один диалог. Новые сообщения подтягиваются раз в несколько секунд, пока страница открыта.
-import { api, auth } from '../api.js';
+import { api, apiBlob, auth } from '../api.js';
 import { authForm } from '../auth.js';
+import { CHAT_REASONS } from '../catalog.js';
+import { compress } from '../images.js';
 import { icon } from '../icons.js';
 import { t } from '../i18n.js';
 import { reviewForm } from '../reviews.js';
 import { refreshUnread } from '../unread.js';
-import { $, dateText, emptyState, errorText, esc, priceText, sheet, timeText, toast } from '../ui.js';
+import { openViewer } from '../viewer.js';
+import { $, $$, dateText, emptyState, errorText, esc, priceText, sheet, timeText, toast } from '../ui.js';
 
 const EVERY = 4000;
+const AT_ONCE = 4; // столько фото можно отправить за один раз
 
 export default async function chatPage({ root, params, alive, back, rerender, onLeave }) {
   const id = Number(params[0]);
@@ -47,12 +51,15 @@ export default async function chatPage({ root, params, alive, back, rerender, on
   root.innerHTML = `
     <div class="chat">
       <div class="chat-top">
-        ${head(chat.other)}
+        <div class="chat-head">${head(chat.other)}<button class="icon-btn" data-more aria-label="${esc(t('chatActions'))}">${icon('more')}</button></div>
         ${gone ? `<div class="chat-ad">${ad}</div>` : `<a class="chat-ad" href="/item/${listing.id}">${ad}</a>`}
         <div class="chat-review"></div>
       </div>
       <div class="messages" role="log" aria-live="polite"></div>
+      <div class="chat-closed" hidden></div>
       <form class="composer">
+        <button type="button" class="attach" aria-label="${esc(t('attachPhoto'))}">${icon('camera')}</button>
+        <input type="file" accept="image/*" multiple hidden>
         <textarea class="input" rows="1" maxlength="1000" enterkeyhint="send" aria-label="${esc(t('chatInput'))}" placeholder="${esc(t('chatInput'))}"></textarea>
         <button class="btn" aria-label="${esc(t('sendMessage'))}">${icon('send')}</button>
       </form>
@@ -65,6 +72,19 @@ export default async function chatPage({ root, params, alive, back, rerender, on
   const nearEnd = () => innerHeight + scrollY > document.documentElement.scrollHeight - 160;
   const toEnd = () => scrollTo(0, document.documentElement.scrollHeight);
 
+  // Снимки скачиваются с ключом входа и живут в памяти, пока открыт диалог.
+  const pictures = new Map();
+  onLeave(() => pictures.forEach((url) => url.then(URL.revokeObjectURL, () => {})));
+  const picture = (photo, size = '') => {
+    const name = photo + size;
+    if (!pictures.has(name)) {
+      const url = apiBlob(`/chats/${id}/photos/${photo}${size}`).then((blob) => URL.createObjectURL(blob));
+      url.catch(() => pictures.delete(name));
+      pictures.set(name, url);
+    }
+    return pictures.get(name);
+  };
+
   function draw() {
     let day = '';
     const lastMine = [...messages].reverse().find((m) => m.mine);
@@ -74,10 +94,116 @@ export default async function chatPage({ root, params, alive, back, rerender, on
         const divider = date === day ? '' : `<p class="day">${esc(date)}</p>`;
         day = date;
         const state = m === lastMine ? `, ${t(m.id <= read ? 'read' : 'sent').toLowerCase()}` : '';
-        return `${divider}<div class="msg${m.mine ? ' mine' : ''}"><p>${esc(m.text)}</p><small>${esc(timeText(m.at) + state)}</small></div>`;
+        const body = m.photo
+          ? `<button type="button" class="msg-photo" data-photo="${esc(m.photo)}" aria-label="${esc(t('openPhoto'))}"><img alt="${esc(t('photoMessage'))}"></button>`
+          : `<p>${esc(m.text)}</p>`;
+        return `${divider}<div class="msg${m.mine ? ' mine' : ''}">${body}<small>${esc(timeText(m.at) + state)}</small></div>`;
       })
       .join('');
+    $$('[data-photo]', list).forEach(async (button) => {
+      try {
+        const url = await picture(button.dataset.photo, '/t');
+        $('img', button).src = url;
+      } catch {
+        button.classList.add('lost');
+      }
+    });
   }
+
+  list.addEventListener('click', async (e) => {
+    const button = e.target.closest('[data-photo]');
+    if (!button) return;
+    try {
+      const url = await picture(button.dataset.photo);
+      if (alive()) openViewer([url], 0, chat.other);
+    } catch (err) {
+      if (alive()) toast(errorText(err));
+    }
+  });
+
+  // Вместо поля ввода — объяснение, почему написать нельзя.
+  function drawState() {
+    const box = $('.chat-closed', root);
+    box.hidden = chat.canWrite;
+    form.hidden = !chat.canWrite;
+    box.innerHTML = chat.canWrite
+      ? ''
+      : `<p>${esc(t(chat.blockedByMe ? 'youBlocked' : 'err_blocked'))}</p>${
+          chat.blockedByMe ? `<button type="button" class="btn ghost">${esc(t('unblock'))}</button>` : ''
+        }`;
+    $('button', box)?.addEventListener('click', () => block(false));
+  }
+
+  async function block(on) {
+    try {
+      await api(`/chats/${id}/block`, { method: on ? 'POST' : 'DELETE' });
+      if (!alive()) return;
+      toast(t(on ? 'blockedDone' : 'unblockedDone'));
+      await poll();
+    } catch (e) {
+      if (alive()) toast(errorText(e));
+    }
+  }
+
+  function askBlock() {
+    const s = sheet(`<p>${esc(t('blockAbout'))}</p><button class="btn wide danger">${esc(t('block'))}</button>`, {
+      title: `${t('block')}: ${chat.other}`,
+    });
+    $('button', s.body).onclick = () => {
+      s.close();
+      block(true);
+    };
+  }
+
+  function askComplaint() {
+    const s = sheet(
+      `<form class="form">
+        <fieldset><legend>${esc(t('complaintWhy'))}</legend><div class="segs">${CHAT_REASONS.map(
+          (r, i) => `<label class="seg"><input type="radio" name="reason" value="${r}"${i ? '' : ' checked'}><span>${esc(t(`cr_${r}`))}</span></label>`
+        ).join('')}</div></fieldset>
+        <label class="field"><span>${esc(t('complaintComment'))}</span><textarea class="input" name="comment" rows="3" maxlength="500"></textarea></label>
+        ${chat.blockedByMe ? '' : `<label class="check"><input type="checkbox" name="block" checked><span>${esc(t('alsoBlock'))}</span></label>`}
+        <p class="muted small">${esc(t('complaintNote'))}</p>
+        <button class="btn wide">${esc(t('sendComplaint'))}</button>
+      </form>`,
+      { title: t('complain') }
+    );
+    const complaint = $('form', s.body);
+    complaint.onsubmit = async (e) => {
+      e.preventDefault();
+      const { reason, comment, block: alsoBlock } = complaint.elements;
+      const button = $('.btn', complaint);
+      button.disabled = true;
+      try {
+        await api(`/chats/${id}/complaint`, {
+          method: 'POST',
+          body: { reason: reason.value, comment: comment.value, block: Boolean(alsoBlock?.checked) },
+        });
+        s.close();
+        toast(t('complaintSent'));
+        if (alive()) await poll();
+      } catch (err) {
+        button.disabled = false;
+        toast(errorText(err));
+      }
+    };
+  }
+
+  $('[data-more]', root).onclick = () => {
+    const row = (name, ic, text) => `<li><button data-act="${name}">${icon(ic)}<span>${esc(text)}</span></button></li>`;
+    const s = sheet(
+      `<ul class="menu">${row('complain', 'flag', t('complain'))}${row(
+        chat.blockedByMe ? 'unblock' : 'block', 'ban', t(chat.blockedByMe ? 'unblock' : 'block')
+      )}</ul>`,
+      { title: chat.other }
+    );
+    $$('[data-act]', s.body).forEach((b) => {
+      b.onclick = () => {
+        s.close();
+        ({ complain: askComplaint, block: askBlock, unblock: () => block(false) })[b.dataset.act]();
+      };
+    });
+  };
 
   function drawReview() {
     const box = $('.chat-review', root);
@@ -106,6 +232,7 @@ export default async function chatPage({ root, params, alive, back, rerender, on
 
   draw();
   drawReview();
+  drawState();
   // Роутер после отрисовки прокручивает наверх, поэтому к последнему сообщению переходим кадром позже.
   requestAnimationFrame(() => alive() && toEnd());
   refreshUnread();
@@ -129,7 +256,9 @@ export default async function chatPage({ root, params, alive, back, rerender, on
         const changed = added || next.read !== read;
         read = next.read;
         const reviewChanged = JSON.stringify([next.chat.canReview, next.chat.review]) !== JSON.stringify([chat.canReview, chat.review]);
+        const stateChanged = next.chat.canWrite !== chat.canWrite || next.chat.blockedByMe !== chat.blockedByMe;
         chat = next.chat;
+        if (stateChanged) drawState();
         if (changed) draw();
         if (reviewChanged) drawReview();
         if (added && stick) toEnd();
@@ -140,6 +269,8 @@ export default async function chatPage({ root, params, alive, back, rerender, on
         busy = false;
       }
     }
+    // опрос могли вызвать вне очереди: таймер всё равно должен остаться один
+    clearTimeout(timer);
     if (alive()) timer = setTimeout(poll, EVERY);
   }
   timer = setTimeout(poll, EVERY);
@@ -157,10 +288,46 @@ export default async function chatPage({ root, params, alive, back, rerender, on
       form.requestSubmit();
     }
   });
+  const attach = $('.attach', form);
+  const files = $('input[type="file"]', form);
+  attach.onclick = () => files.click();
+  files.onchange = async () => {
+    const chosen = [...files.files].slice(0, AT_ONCE);
+    if (files.files.length > AT_ONCE) toast(t('photosAtOnce'));
+    files.value = '';
+    if (!chosen.length) return;
+    attach.disabled = true;
+    attach.classList.add('busy');
+    for (const file of chosen) {
+      if (!alive()) return;
+      try {
+        toast(t('photoSending'));
+        const { full, thumb } = await compress(file);
+        const body = new FormData();
+        body.set('full', full, 'full');
+        body.set('thumb', thumb, 'thumb');
+        const { message } = await api(`/chats/${id}/photo`, { method: 'POST', body });
+        if (!alive()) return;
+        // свой снимок уже есть в памяти, скачивать его заново незачем
+        pictures.set(`${message.photo}/t`, Promise.resolve(URL.createObjectURL(thumb)));
+        add([message]);
+        draw();
+        toEnd();
+      } catch (err) {
+        if (!alive()) return;
+        if (err.code === 'login_required') return login();
+        toast(err.code ? errorText(err) : t('badPhoto'));
+        break;
+      }
+    }
+    attach.disabled = false;
+    attach.classList.remove('busy');
+  };
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const text = input.value.trim();
-    const button = $('button', form);
+    const button = $('.btn', form);
     if (!text || button.disabled) return input.focus();
     button.disabled = true;
     try {
@@ -176,6 +343,7 @@ export default async function chatPage({ root, params, alive, back, rerender, on
       if (!alive()) return;
       if (err.code === 'login_required') return login();
       toast(errorText(err));
+      if (err.code === 'blocked' || err.code === 'you_blocked') poll();
     }
     button.disabled = false;
   });

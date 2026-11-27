@@ -10,3 +10,6 @@ CREATE TABLE listings (
 CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, username TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL);
 INSERT INTO listings (owner, title, search, price, price_type, condition, category, city, name, phone, created_at, bumped_at, expires_at)
 VALUES ('-', 'Старое кресло', 'старое кресло', 10000, 'fixed', 'used', 'home_garden', 'astana', 'Ерлан', '77010000000', 1700000000, 1700000000, 4000000000);
+-- Фото и сообщения без столбцов, добавленных позже.
+CREATE TABLE photos (id TEXT PRIMARY KEY, owner TEXT NOT NULL, listing_id INTEGER, mime TEXT NOT NULL, full BLOB, thumb BLOB, created_at INTEGER NOT NULL);
+CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER NOT NULL, sender TEXT NOT NULL, text TEXT NOT NULL, created_at INTEGER NOT NULL);

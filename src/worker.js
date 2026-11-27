@@ -2,7 +2,7 @@ import { ensureSchema } from './schema.js';
 import { HttpError, fail, json, limit, randomHex, safeEqual, sha256 } from './util.js';
 import * as listings from './listings.js';
 import { servePhoto, uploadPhoto } from './photos.js';
-import { register, requireUser, signIn, signOut } from './auth.js';
+import { changePassword, recover, register, replaceCode, requireUser, signIn, signOut } from './auth.js';
 import * as chat from './chat.js';
 import * as reviews from './reviews.js';
 import { draftFromPhoto } from './ai.js';
@@ -24,7 +24,7 @@ async function identify(request, env) {
   if (!token) return { ip, owner: null, user: null };
   const hash = await sha256(token);
   const user = await env.DB.prepare(
-    'SELECT u.id, u.name, u.login FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.hash = ? AND u.login IS NOT NULL'
+    'SELECT u.id, u.name, u.login, u.rec_hash IS NOT NULL AS recovery FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.hash = ? AND u.login IS NOT NULL'
   )
     .bind(hash)
     .first();
@@ -39,11 +39,16 @@ async function api(request, env, ctx, url) {
 
   if (method === 'GET' && path === '/config') return json({ ai: Boolean(env.AI) });
   if (method === 'GET' && path === '/me') {
-    return json({ user: who.user ? { name: who.user.name, login: who.user.login } : null });
+    const { user } = who;
+    return json({ user: user ? { name: user.name, login: user.login, recovery: Boolean(user.recovery) } : null });
   }
   if (method === 'POST' && path === '/auth/register') return register(request, env, who);
   if (method === 'POST' && path === '/auth/login') return signIn(request, env, who);
   if (method === 'POST' && path === '/auth/logout') return signOut(env, who);
+  if (method === 'POST' && path === '/auth/recover') return recover(request, env, who);
+  if (method === 'POST' && path === '/auth/password') return changePassword(request, env, who);
+  if (method === 'POST' && path === '/auth/code') return replaceCode(request, env, who);
+  if (method === 'GET' && path === '/price-hint') return listings.priceHint(env, url, who);
 
   if (method === 'GET' && path === '/chats') return chat.listChats(env, who);
   if (method === 'GET' && path === '/chats/unread') return chat.unread(env, who);
@@ -56,6 +61,15 @@ async function api(request, env, ctx, url) {
       if (method === 'GET') return chat.getChat(env, url, id, who);
       if (method === 'POST') return chat.sendMessage(request, env, id, who);
     }
+  }
+  if ((m = /^\/chats\/(\d{1,12})\/(photo|block|complaint)$/.exec(path))) {
+    const id = Number(m[1]);
+    if (m[2] === 'photo' && method === 'POST') return chat.sendPhoto(request, env, id, who);
+    if (m[2] === 'complaint' && method === 'POST') return chat.complain(request, env, id, who);
+    if (m[2] === 'block' && (method === 'POST' || method === 'DELETE')) return chat.setBlock(env, id, method === 'POST', who);
+  }
+  if (method === 'GET' && (m = /^\/chats\/(\d{1,12})\/photos\/([a-f0-9]{24})(\/t)?$/.exec(path))) {
+    return chat.chatPhoto(env, Number(m[1]), m[2], m[3] ? 'thumb' : 'full', who);
   }
 
   if (method === 'POST' && path === '/ai/draft') return draftFromPhoto(request, env, url, who);
@@ -98,6 +112,9 @@ async function api(request, env, ctx, url) {
       fail(403, 'forbidden');
     }
     if (method === 'GET' && path === '/admin/reports') return listings.adminReports(env);
+    if (method === 'GET' && path === '/admin/complaints') return chat.adminComplaints(env);
+    if (method === 'GET' && (m = /^\/admin\/chat-photos\/([a-f0-9]{24})$/.exec(path))) return chat.adminChatPhoto(env, m[1]);
+    if (method === 'POST' && (m = /^\/admin\/complaints\/(\d{1,12})$/.exec(path))) return chat.adminComplaint(request, env, Number(m[1]));
     if (method === 'GET' && path === '/admin/reviews') return reviews.adminReviews(env);
     if (method === 'DELETE' && (m = /^\/admin\/reviews\/(\d{1,12})$/.exec(path))) {
       return reviews.adminDeleteReview(env, Number(m[1]));

@@ -21,9 +21,14 @@ async function readPart(form, name, max) {
 }
 
 export async function uploadPhoto(request, env, { owner, ip }) {
-  if (Number(request.headers.get('content-length') || 0) > 1_200_000) fail(413, 'photo_too_large');
   await limit(env, `up:${ip}`, 200, 3600);
   await limit(env, `up:${owner}`, 60, 3600);
+  return json({ id: await storePhoto(request, env, owner) }, 201);
+}
+
+// chatId задан у снимков из переписки: их видят только участники диалога.
+export async function storePhoto(request, env, owner, chatId = null) {
+  if (Number(request.headers.get('content-length') || 0) > 1_200_000) fail(413, 'photo_too_large');
   const form = await request.formData().catch(() => fail(400, 'bad_photo'));
   const full = await readPart(form, 'full', LIMITS.fullBytes);
   const thumb = await readPart(form, 'thumb', LIMITS.thumbBytes);
@@ -36,11 +41,23 @@ export async function uploadPhoto(request, env, { owner, ip }) {
     await env.PHOTOS.put(`${id}/thumb`, thumb.buf);
   }
   await env.DB.prepare(
-    'INSERT INTO photos (id, owner, mime, full, thumb, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+    'INSERT INTO photos (id, owner, mime, full, thumb, created_at, chat_id) VALUES (?, ?, ?, ?, ?, ?, ?)'
   )
-    .bind(id, owner, full.mime, inR2 ? null : full.buf, inR2 ? null : thumb.buf, now())
+    .bind(id, owner, full.mime, inR2 ? null : full.buf, inR2 ? null : thumb.buf, now(), chatId)
     .run();
-  return json({ id }, 201);
+  return id;
+}
+
+// Ответ с картинкой из базы или R2; null, если файла нет.
+export async function photoResponse(env, id, variant, row, cache) {
+  const column = variant === 'thumb' ? 'thumb' : 'full';
+  let body;
+  if (row.data) body = new Uint8Array(row.data);
+  else if (env.PHOTOS) body = (await env.PHOTOS.get(`${id}/${column}`))?.body;
+  if (!body) return null;
+  return new Response(body, {
+    headers: { 'content-type': row.mime, 'cache-control': cache, 'x-content-type-options': 'nosniff' },
+  });
 }
 
 export async function servePhoto(request, env, ctx, id, variant) {
@@ -49,23 +66,12 @@ export async function servePhoto(request, env, ctx, id, variant) {
   if (cached) return cached;
 
   const column = variant === 'thumb' ? 'thumb' : 'full';
-  const row = await env.DB.prepare(`SELECT mime, ${column} AS data FROM photos WHERE id = ?`)
+  // Снимки из переписки по открытому адресу не отдаются.
+  const row = await env.DB.prepare(`SELECT mime, ${column} AS data FROM photos WHERE id = ? AND chat_id IS NULL`)
     .bind(id)
     .first();
-  if (!row) return new Response('Not found', { status: 404 });
-
-  let body;
-  if (row.data) body = new Uint8Array(row.data);
-  else if (env.PHOTOS) body = (await env.PHOTOS.get(`${id}/${column}`))?.body;
-  if (!body) return new Response('Not found', { status: 404 });
-
-  const response = new Response(body, {
-    headers: {
-      'content-type': row.mime,
-      'cache-control': 'public, max-age=31536000, immutable',
-      'x-content-type-options': 'nosniff',
-    },
-  });
+  const response = row && (await photoResponse(env, id, variant, row, 'public, max-age=31536000, immutable'));
+  if (!response) return new Response('Not found', { status: 404 });
   ctx.waitUntil(cache.put(request, response.clone()));
   return response;
 }
@@ -80,7 +86,7 @@ export async function deletePhotos(env, ids) {
 // Незавершённые черновики: фото без объявления старше двух суток.
 export async function deleteOrphans(env) {
   const { results } = await env.DB.prepare(
-    'SELECT id FROM photos WHERE listing_id IS NULL AND created_at < ? LIMIT 40'
+    'SELECT id FROM photos WHERE listing_id IS NULL AND chat_id IS NULL AND created_at < ? LIMIT 40'
   )
     .bind(now() - 2 * DAY)
     .all();

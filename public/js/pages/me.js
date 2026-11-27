@@ -1,9 +1,9 @@
 import { api, currentUser, signOut } from '../api.js';
-import { authForm } from '../auth.js';
+import { authForm, codeSheet, passwordSheet } from '../auth.js';
 import { icon } from '../icons.js';
 import { lang, t } from '../i18n.js';
 import { store } from '../store.js';
-import { $, cityName, cityOptions, dateText, errorText, esc, initial, pick, priceText, sheet, toast } from '../ui.js';
+import { $, $$, cityName, cityOptions, dateText, errorText, esc, initial, pick, priceText, sheet, toast } from '../ui.js';
 
 export default async function me({ root, alive, rerender }) {
   root.innerHTML = `
@@ -28,7 +28,14 @@ export default async function me({ root, alive, rerender }) {
           <span class="avatar" aria-hidden="true">${initial(user.name)}</span>
           <div><strong>${esc(user.name)}</strong><small>${esc(user.login)}</small></div>
           <button class="icon-btn" data-logout aria-label="${esc(t('logout'))}">${icon('logout')}</button>
-        </div>`;
+        </div>
+        <ul class="menu">
+          <li><button data-security="password">${icon('lock')}<span>${esc(t('changePassword'))}</span><small></small>${icon('next')}</button></li>
+          <li><button data-security="code">${icon('key')}<span>${esc(t('codeTitle'))}</span><small${user.recovery ? '' : ' class="todo"'}>${esc(t(user.recovery ? 'codeExists' : 'codeMissing'))}</small>${icon('next')}</button></li>
+        </ul>`;
+      $$('[data-security]', account).forEach((b) => {
+        b.onclick = () => (b.dataset.security === 'password' ? passwordSheet(user) : codeSheet(user, rerender));
+      });
       $('[data-logout]', account).onclick = async () => {
         await signOut();
         rerender();

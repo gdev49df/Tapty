@@ -65,8 +65,9 @@ async function upload(token, bytes = jpeg) {
 
 // Новый аккаунт; guest — ключ устройства, с которого регистрируются.
 let logins = 0;
-async function signUp(name, { guest = key(), login = `user_${++logins}` } = {}) {
-  const r = await call('/api/auth/register', { token: guest, method: 'POST', body: { login, name, key: key() } });
+async function signUp(name, { guest = key(), login = `user_${++logins}`, ip } = {}) {
+  const headers = ip ? { 'cf-connecting-ip': ip } : {};
+  const r = await call('/api/auth/register', { token: guest, method: 'POST', body: { login, name, key: key() }, headers });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   return r.data.token;
 }
@@ -140,6 +141,7 @@ try {
     const done = await register({ login: 'Aliya', name: 'Алия', key: secret });
     assert.equal(done.status, 200, JSON.stringify(done.data));
     assert.deepEqual(done.data.user, { name: 'Алия', login: 'aliya' });
+    assert.match(done.data.code, /^([0-9A-HJKMNP-TV-Z]{4}-){3}[0-9A-HJKMNP-TV-Z]{4}$/);
     assert.equal((await register({ login: 'ALIYA', name: 'Другая', key: secret })).data.error, 'login_taken');
 
     const signIn = (login, k) => call('/api/auth/login', { token: key(), method: 'POST', body: { login, key: k } });
@@ -147,7 +149,8 @@ try {
     assert.equal((await signIn('nobody', secret)).data.error, 'bad_credentials');
     const again = await signIn(' Aliya ', secret);
     assert.equal(again.status, 200);
-    assert.deepEqual((await call('/api/me', { token: again.data.token })).data.user, { name: 'Алия', login: 'aliya' });
+    assert.deepEqual((await call('/api/me', { token: again.data.token })).data.user, { name: 'Алия', login: 'aliya', recovery: true });
+    assert.equal(again.data.code, undefined);
     await call('/api/auth/logout', { token: again.data.token, method: 'POST' });
     assert.equal((await call('/api/me', { token: again.data.token })).data.user, null);
     alice = done.data.token;
@@ -502,6 +505,173 @@ try {
     let r;
     for (let i = 0; i < 31; i++) r = await say(buyer, `сообщение ${i}`);
     assert.equal(r.data.error, 'rate_limit');
+  });
+
+  // Своя «сеть» для остальных проверок, чтобы не упереться в дневной предел регистраций.
+  const ip = '203.0.113.7';
+  const enter = (name, over = {}) => signUp(name, { ip, ...over });
+  const post = (path, token, body) => call(path, { token, method: 'POST', body, headers: { 'cf-connecting-ip': ip } });
+  const me = async (token) => (await call('/api/me', { token })).data.user;
+
+  await test('резервный код: восстановление пароля, смена пароля, новый код', async () => {
+    const first = key();
+    const made = (await post('/api/auth/register', key(), { login: 'roza', name: 'Роза', key: first })).data;
+    const signIn = (k) => post('/api/auth/login', key(), { login: 'roza', key: k });
+    const recover = (code, k, login = 'roza') => post('/api/auth/recover', key(), { login, code, key: k });
+    const second = key();
+    assert.equal((await recover('0000-0000-0000-0000', second)).data.error, 'bad_code');
+    assert.equal((await recover(made.code, second, 'nobody')).data.error, 'bad_code');
+    // код можно вводить строчными, без дефисов и с пробелами
+    const back = await recover(` ${made.code.toLowerCase().replaceAll('-', ' ')} `, second);
+    assert.equal(back.status, 200, JSON.stringify(back.data));
+    assert.notEqual(back.data.code, made.code);
+    assert.equal(await me(made.token), null);
+    assert.equal((await me(back.data.token)).login, 'roza');
+    assert.equal((await signIn(first)).data.error, 'bad_credentials');
+    assert.equal((await recover(made.code, key())).data.error, 'bad_code');
+
+    const other = (await signIn(second)).data.token;
+    const third = key();
+    assert.equal((await post('/api/auth/password', key(), { key: second, newKey: third })).data.error, 'login_required');
+    const wrong = await post('/api/auth/password', other, { key: first, newKey: third });
+    assert.deepEqual([wrong.status, wrong.data.error], [403, 'wrong_password']);
+    assert.equal((await post('/api/auth/password', other, { key: second, newKey: 'x' })).status, 400);
+    assert.equal((await post('/api/auth/password', other, { key: second, newKey: third })).status, 200);
+    assert.equal((await me(other)).login, 'roza');
+    assert.equal(await me(back.data.token), null);
+    assert.equal((await signIn(second)).data.error, 'bad_credentials');
+    assert.equal((await signIn(third)).status, 200);
+
+    assert.equal((await post('/api/auth/code', other, { key: second })).data.error, 'wrong_password');
+    const fresh = (await post('/api/auth/code', other, { key: third })).data.code;
+    assert.equal((await recover(back.data.code, key())).data.error, 'bad_code');
+    assert.equal((await recover(fresh, key())).status, 200);
+
+    let last;
+    for (let i = 0; i < 6; i++) last = await recover('1111-1111-1111-1111', key(), 'guessing');
+    assert.equal(last.data.error, 'rate_limit');
+  });
+
+  let anna;
+  let boris;
+  let talk;
+  let shot;
+  const form = (bytes = jpeg) => {
+    const data = new FormData();
+    data.set('full', new Blob([bytes]), 'full');
+    data.set('thumb', new Blob([bytes]), 'thumb');
+    return data;
+  };
+
+  await test('фото в чате видят только участники', async () => {
+    [anna, boris] = [await enter('Продавец'), await enter('Покупатель два')];
+    const goods = await create(anna, { title: 'Пылесос моющий', phone: '77060000001', price: 30000, category: 'electronics' });
+    talk = (await post(`/api/listings/${goods}/chat`, boris, { text: 'Пришлите фото' })).data.chat;
+    assert.equal((await post(`/api/chats/${talk}/photo`, anna, form(new TextEncoder().encode('не картинка')))).status, 400);
+    const sent = await post(`/api/chats/${talk}/photo`, anna, form());
+    assert.equal(sent.status, 201, JSON.stringify(sent.data));
+    shot = sent.data.message.photo;
+    assert.equal((await call('/api/chats', { token: boris })).data.items[0].last, '');
+    assert.equal(await unread(boris), 1);
+    assert.equal((await call(`/api/chats/${talk}`, { token: boris })).data.messages.at(-1).photo, shot);
+    for (const size of ['', '/t']) {
+      const r = await fetch(`${BASE}/api/chats/${talk}/photos/${shot}${size}`, { headers: { authorization: `Bearer ${boris}` } });
+      assert.equal(r.status, 200);
+      assert.match(r.headers.get('cache-control'), /private/);
+      assert.deepEqual(new Uint8Array(await r.arrayBuffer()), jpeg);
+      assert.equal((await fetch(`${BASE}/p/${shot}${size}`)).status, 404);
+    }
+    const stranger = await enter('Посторонний');
+    assert.equal((await call(`/api/chats/${talk}/photos/${shot}`, { token: stranger })).status, 404);
+    assert.equal((await call(`/api/chats/${talk}/photos/${shot}`, { token: key() })).status, 401);
+    assert.equal((await post(`/api/chats/${talk}/photo`, stranger, form())).status, 404);
+    // через свой диалог чужой снимок тоже не достать
+    const theirs = (await post(`/api/listings/${goods}/chat`, stranger, { text: 'Здравствуйте' })).data.chat;
+    assert.equal((await call(`/api/chats/${theirs}/photos/${shot}`, { token: stranger })).status, 404);
+    const attach = await call('/api/listings', { token: anna, method: 'POST', body: listing({ phone: '77060000001', photos: [shot] }) });
+    assert.equal(attach.data.error, 'photos_lost');
+  });
+
+  await test('блокировка закрывает переписку в обе стороны', async () => {
+    const block = (token, method = 'POST') => call(`/api/chats/${talk}/block`, { token, method });
+    const text = (token) => post(`/api/chats/${talk}`, token, { text: 'Ау' });
+    assert.equal((await block(await enter('Мимо'))).status, 404);
+    assert.equal((await block(key())).status, 401);
+    assert.equal((await block(boris)).status, 200);
+    assert.equal((await block(boris)).status, 200);
+    assert.equal((await text(anna)).data.error, 'blocked');
+    assert.equal((await post(`/api/chats/${talk}/photo`, anna, form())).data.error, 'blocked');
+    assert.equal((await text(boris)).data.error, 'you_blocked');
+    const another = await create(anna, { title: 'Утюг паровой', phone: '77060000001', price: 9000, category: 'electronics' });
+    assert.equal((await post(`/api/listings/${another}/chat`, boris, { text: 'А это?' })).data.error, 'you_blocked');
+    const seen = async (token) => (await call(`/api/chats/${talk}`, { token })).data.chat;
+    assert.deepEqual([(await seen(boris)).blockedByMe, (await seen(boris)).canWrite], [true, false]);
+    assert.deepEqual([(await seen(anna)).blockedByMe, (await seen(anna)).canWrite], [false, false]);
+    assert.equal((await call('/api/chats', { token: boris })).data.items[0].blocked, true);
+    // снять чужую блокировку нельзя
+    await block(anna, 'DELETE');
+    assert.equal((await text(anna)).data.error, 'blocked');
+    await block(boris, 'DELETE');
+    assert.equal((await text(anna)).status, 201);
+  });
+
+  await test('жалоба из чата и решение модератора', async () => {
+    const complain = (token, body) => post(`/api/chats/${talk}/complaint`, token, body);
+    assert.equal((await complain(boris, { reason: 'bored' })).status, 400);
+    assert.equal((await complain(key(), { reason: 'spam' })).data.error, 'login_required');
+    assert.equal((await complain(await enter('Сбоку'), { reason: 'spam' })).status, 404);
+    const admin = (path, options = {}) => call(`/api/admin/${path}`, { ...options, headers: adminHeaders });
+    assert.equal((await admin(`chat-photos/${shot}`)).status, 404); // пока жалобы нет
+    assert.equal((await complain(boris, { reason: 'spam' })).status, 201);
+    assert.equal((await complain(boris, { reason: 'fraud', comment: 'Просит предоплату', block: true })).status, 201);
+    assert.equal((await post(`/api/chats/${talk}`, anna, { text: 'Эй' })).data.error, 'blocked');
+    let queue = (await admin('complaints')).data.items;
+    assert.equal(queue.length, 1);
+    assert.deepEqual(
+      [queue[0].reason, queue[0].comment, queue[0].author, queue[0].accused, queue[0].banned],
+      ['fraud', 'Просит предоплату', 'Покупатель два', 'Продавец', false]
+    );
+    assert.ok(queue[0].messages.some((m) => m.photo === shot && m.accused));
+    assert.equal(queue[0].messages[0].text, 'Пришлите фото');
+    assert.equal((await admin(`chat-photos/${shot}`)).status, 200);
+    assert.equal((await call(`/api/admin/chat-photos/${shot}`, { headers: { 'x-admin-key': 'x' } })).status, 403);
+    assert.equal((await call('/api/admin/complaints', { token: boris, headers: { 'x-admin-key': 'x' } })).status, 403);
+    await admin(`complaints/${queue[0].id}`, { method: 'POST', body: { action: 'dismiss' } });
+    assert.equal((await admin('complaints')).data.items.length, 0);
+    assert.equal((await me(anna)).name, 'Продавец');
+    await complain(boris, { reason: 'fraud' });
+    queue = (await admin('complaints')).data.items;
+    await admin(`complaints/${queue[0].id}`, { method: 'POST', body: { action: 'ban' } });
+    assert.equal((await post('/api/listings', anna, listing({ phone: '77060000009' }))).data.error, 'banned');
+    assert.equal((await call('/api/listings?cat=electronics')).data.items.length, 0);
+    const clean = await enter('Новый аккаунт');
+    assert.equal((await post('/api/listings', clean, listing({ phone: '77060000001' }))).data.error, 'banned');
+    assert.equal((await post('/api/listings', clean, listing({ phone: '77060000008' }))).status, 201);
+  });
+
+  await test('подсказка цены: похожие, проданные, состояние', async () => {
+    const hint = async (over = {}, token) =>
+      (await call(`/api/price-hint?${new URLSearchParams({ title: 'Монитор Dell P2419H', cat: 'electronics', ...over })}`, { token })).data;
+    assert.deepEqual(await hint(), { count: 0 });
+    const [x, y] = [await enter('Икс'), await enter('Игрек')];
+    const sell = (token, price, n, over = {}) =>
+      create(token, { title: 'Монитор Dell P2419H', category: 'electronics', phone: `7707000000${n}`, price, ...over });
+    const one = await sell(x, 50000, 1);
+    assert.deepEqual(await hint(), { count: 1, low: 50000, high: 50000, typical: 0, otherCondition: false });
+    const sold = await sell(x, 60000, 1, { title: 'Dell P2419H монитор' });
+    await post(`/api/listings/${sold}/status`, x, { action: 'sold' });
+    await sell(y, 55555, 2);
+    await sell(y, 900000, 2); // в разы дороже остальных
+    await sell(y, 1000, 2, { title: 'Монитор Dell U2722D' }); // другая модель
+    assert.deepEqual(await hint(), { count: 3, low: 50000, high: 60000, typical: 55600, otherCondition: false });
+    assert.equal((await hint({}, x)).count, 1); // свои объявления не считаются
+    assert.equal((await hint({ exclude: one })).count, 2);
+    assert.deepEqual([(await hint({ cond: 'used' })).count, (await hint({ cond: 'used' })).otherCondition], [3, false]);
+    assert.equal((await hint({ cond: 'new' })).otherCondition, true);
+    await sell(y, 80000, 2, { condition: 'new' });
+    assert.deepEqual(await hint({ cond: 'new' }), { count: 1, low: 80000, high: 80000, typical: 0, otherCondition: false });
+    assert.deepEqual(await hint({ cat: 'x' }), { count: 0 });
+    assert.deepEqual(await hint({ title: '!!!' }), { count: 0 });
   });
 
   console.log(`\nвсе проверки пройдены: ${passed}`);

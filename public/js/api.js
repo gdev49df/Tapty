@@ -45,25 +45,35 @@ export class ApiError extends Error {
   }
 }
 
-export async function api(path, { method = 'GET', body, headers = {}, signal } = {}) {
+async function request(path, { method = 'GET', body, headers = {}, signal } = {}) {
   const init = { method, signal, headers: { authorization: `Bearer ${auth.token()}`, ...headers } };
   if (body instanceof FormData || body instanceof Blob) init.body = body;
   else if (body !== undefined) {
     init.body = JSON.stringify(body);
     init.headers['content-type'] = 'application/json';
   }
-  let res;
   try {
-    res = await fetch(`/api${path}`, init);
+    return await fetch(`/api${path}`, init);
   } catch (e) {
     if (e.name === 'AbortError') throw e;
     throw new ApiError(0, 'network');
   }
+}
+
+export async function api(path, options) {
+  const res = await request(path, options);
   const data = await res.json().catch(() => null);
   // Сессия больше не действует.
   if (data?.error === 'login_required') dropSession();
   if (!res.ok || !data) throw new ApiError(res.status, data?.error || 'server', data?.field);
   return data;
+}
+
+// Файл, который виден только вошедшему: обычный <img src> не передал бы ключ.
+export async function apiBlob(path, options) {
+  const res = await request(path, options);
+  if (!res.ok) throw new ApiError(res.status, 'server');
+  return res.blob();
 }
 
 let configPromise = null;

@@ -1,13 +1,15 @@
-// Вход и регистрация по логину и паролю.
+// Вход, регистрация, восстановление и смена пароля.
 import { ApiError, api, auth, setSession } from './api.js';
-import { t } from './i18n.js';
 import { icon } from './icons.js';
+import { t } from './i18n.js';
 import { $, $$, errorText, esc, sheet, toast } from './ui.js';
 
 const LOGIN = /^[a-z0-9_.]{3,24}$/;
+const MIN = 8;
 
 // Пароль не уходит из браузера: на сервер отправляется ключ, посчитанный из пароля и логина.
 async function deriveKey(login, password) {
+  if (!crypto.subtle) throw new ApiError(0, 'insecure');
   const encode = (s) => new TextEncoder().encode(s);
   const base = await crypto.subtle.importKey('raw', encode(password), 'PBKDF2', false, ['deriveBits']);
   const bits = await crypto.subtle.deriveBits(
@@ -18,26 +20,106 @@ async function deriveKey(login, password) {
   return [...new Uint8Array(bits)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-export function authForm(root, { onDone, note = '', mode = 'login' }) {
-  // Набранное остаётся при переключении «Вход / Регистрация», в том числе имя, которого нет в форме входа.
-  const typed = {};
-  const field = (name, label, attrs, hint = '') => {
-    const input = `<input class="input" name="${name}" aria-label="${esc(label)}" ${attrs}>`;
-    const eye = `<button type="button" class="eye" aria-label="${esc(t('showPassword'))}">${icon('eye')}</button>`;
-    return `<label class="field" data-field="${name}"><span>${esc(label)}</span>
-      ${name === 'password' ? `<span class="pass">${input}${eye}</span>` : input}${hint ? `<small>${esc(hint)}</small>` : ''}<em></em></label>`;
+function field(name, label, attrs, hint = '') {
+  const secret = attrs.includes('type="password"');
+  const input = `<input class="input" name="${name}" aria-label="${esc(label)}" ${attrs}>`;
+  const eye = `<button type="button" class="eye" aria-label="${esc(t('showPassword'))}">${icon('eye')}</button>`;
+  return `<label class="field" data-field="${name}"><span>${esc(label)}</span>
+    ${secret ? `<span class="pass">${input}${eye}</span>` : input}${hint ? `<small>${esc(hint)}</small>` : ''}<em></em></label>`;
+}
+
+const passwordField = (name, label, autocomplete, hint) =>
+  field(
+    name, label,
+    `type="password" maxlength="100" autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="${autocomplete}"`,
+    hint
+  );
+
+function showPassword(eye, visible) {
+  const input = eye.previousElementSibling;
+  const { selectionStart, selectionEnd } = input;
+  input.type = visible ? 'text' : 'password';
+  if (document.activeElement === input) input.setSelectionRange(selectionStart, selectionEnd);
+  eye.innerHTML = icon(visible ? 'eyeOff' : 'eye');
+  eye.setAttribute('aria-label', t(visible ? 'hidePassword' : 'showPassword'));
+}
+
+function showError(form, name, text) {
+  const box = $(`[data-field="${name}"]`, form);
+  if (!box) return false;
+  box.classList.add('bad');
+  $('em', box).textContent = text;
+  $('input', box).focus();
+  return true;
+}
+
+// Общее поведение форм: «глаз» у паролей, снятие ошибки при вводе, отправка без повторных нажатий.
+function bindForm(form, check, send) {
+  $$('.eye', form).forEach((eye) => {
+    // Нажатие на глаз не забирает фокус у поля, поэтому клавиатура на телефоне не закрывается.
+    eye.onpointerdown = (e) => e.preventDefault();
+    eye.onclick = () => showPassword(eye, eye.previousElementSibling.type === 'password');
+  });
+  form.addEventListener('input', (e) => e.target.closest('[data-field]')?.classList.remove('bad'));
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const bad = check();
+    if (bad) return showError(form, ...bad);
+    const button = $('.btn.wide', form);
+    const errorBox = $('.form-error', form);
+    errorBox.textContent = '';
+    $$('.eye', form).forEach((eye) => showPassword(eye, false));
+    button.disabled = true;
+    try {
+      await send();
+    } catch (err) {
+      button.disabled = false;
+      const at = { login_taken: 'login', bad_code: 'code', wrong_password: 'password' }[err.code];
+      if (!at || !showError(form, at, errorText(err))) errorBox.textContent = errorText(err);
+    }
   };
+}
+
+// Резервный код показывается один раз.
+function codeView(root, code, onDone) {
+  root.innerHTML = `
+    <div class="auth code-view">
+      <h3>${esc(t('codeTitle'))}</h3>
+      <p>${esc(t('codeAbout'))}</p>
+      <output class="backup-code">${esc(code)}</output>
+      <button type="button" class="btn ghost wide" data-copy>${icon('copy')}${esc(t('copyCode'))}</button>
+      <button type="button" class="btn wide" data-done>${esc(t('codeSaved'))}</button>
+    </div>`;
+  $('[data-copy]', root).onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      toast(t('copied'));
+    } catch {
+      // без доступа к буферу выделяем код, чтобы скопировать вручную
+      getSelection().selectAllChildren($('.backup-code', root));
+    }
+  };
+  $('[data-done]', root).onclick = onDone;
+}
+
+export function authForm(root, { onDone, note = '', mode = 'login' }) {
+  // Набранное остаётся при переключении между формами, в том числе имя, которого нет в форме входа.
+  const typed = {};
 
   const draw = () => {
     const signup = mode === 'register';
+    const recovering = mode === 'recover';
+    const button = { login: 'signInButton', register: 'signUpButton', recover: 'recoverButton' }[mode];
     root.innerHTML = `
       <div class="auth">
         ${note ? `<p class="muted">${esc(note)}</p>` : ''}
-        <div class="tabs-line" role="tablist">
-          ${[['login', 'signIn'], ['register', 'signUp']]
-            .map(([id, key]) => `<button type="button" role="tab" data-mode="${id}" aria-selected="${mode === id}">${esc(t(key))}</button>`)
-            .join('')}
-        </div>
+        ${
+          recovering
+            ? `<p>${esc(t('recoverAbout'))}</p>`
+            : `<div class="tabs-line" role="tablist">${[['login', 'signIn'], ['register', 'signUp']]
+                .map(([id, key]) => `<button type="button" role="tab" data-mode="${id}" aria-selected="${mode === id}">${esc(t(key))}</button>`)
+                .join('')}</div>`
+        }
         <form class="form" novalidate>
           ${signup ? field('name', t('fName'), 'maxlength="40" autocomplete="name"') : ''}
           ${field(
@@ -45,14 +127,21 @@ export function authForm(root, { onDone, note = '', mode = 'login' }) {
             'maxlength="24" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false"',
             signup ? t('loginRule') : ''
           )}
-          ${field(
-            'password', t('fPassword'),
-            `type="password" maxlength="100" autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="${signup ? 'new-password' : 'current-password'}"`,
-            signup ? t('passwordRule') : ''
+          ${
+            recovering
+              ? field('code', t('fCode'), 'maxlength="24" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" placeholder="XXXX-XXXX-XXXX-XXXX"')
+              : ''
+          }
+          ${passwordField(
+            'password', t(recovering ? 'fNewPassword' : 'fPassword'),
+            mode === 'login' ? 'current-password' : 'new-password',
+            mode === 'login' ? '' : t('passwordRule')
           )}
           <p class="form-error" role="alert"></p>
-          <button class="btn wide">${esc(t(signup ? 'signUpButton' : 'signInButton'))}</button>
-          ${signup ? `<p class="muted small">${esc(t('noRecovery'))}</p>` : ''}
+          <button class="btn wide">${esc(t(button))}</button>
+          ${signup ? `<p class="muted small">${esc(t('codeLater'))}</p>` : ''}
+          ${mode === 'login' ? `<button type="button" class="link-btn" data-mode="recover">${esc(t('forgot'))}</button>` : ''}
+          ${recovering ? `<button type="button" class="link-btn" data-mode="login">${esc(t('toSignIn'))}</button>` : ''}
         </form>
       </div>`;
     const form = $('form', root);
@@ -66,64 +155,85 @@ export function authForm(root, { onDone, note = '', mode = 'login' }) {
         draw();
       };
     });
-    const eye = $('.eye', form);
-    // Нажатие на глаз не забирает фокус у поля, поэтому клавиатура на телефоне не закрывается.
-    eye.onpointerdown = (e) => e.preventDefault();
-    eye.onclick = () => showPassword(form, form.elements.password.type === 'password');
-    form.addEventListener('input', (e) => e.target.closest('[data-field]')?.classList.remove('bad'));
-    form.onsubmit = submit;
+
+    const value = (name) => form.elements[name]?.value.trim() ?? '';
+    bindForm(
+      form,
+      () => {
+        if (signup && value('name').length < 2) return ['name', t('e_name')];
+        if (!LOGIN.test(value('login').toLowerCase())) return ['login', t('loginRule')];
+        if (recovering && value('code').replace(/[^0-9a-z]/gi, '').length !== 16) return ['code', t('codeRule')];
+        if (form.elements.password.value.length < (mode === 'login' ? 1 : MIN)) return ['password', t('passwordRule')];
+        return null;
+      },
+      async () => {
+        const login = value('login').toLowerCase();
+        const key = await deriveKey(login, form.elements.password.value);
+        const res = await api(`/auth/${mode}`, { method: 'POST', body: { login, key, name: value('name'), code: value('code') } });
+        setSession(res);
+        if (res.code) return codeView(root, res.code, () => onDone(res.user));
+        toast(t('loggedIn'));
+        onDone(res.user);
+      }
+    );
   };
 
-  function showPassword(form, visible) {
-    const input = form.elements.password;
-    const { selectionStart, selectionEnd } = input;
-    input.type = visible ? 'text' : 'password';
-    if (document.activeElement === input) input.setSelectionRange(selectionStart, selectionEnd);
-    const eye = $('.eye', form);
-    eye.innerHTML = icon(visible ? 'eyeOff' : 'eye');
-    eye.setAttribute('aria-label', t(visible ? 'hidePassword' : 'showPassword'));
-  }
-
-  function showError(name, text) {
-    const box = $(`[data-field="${name}"]`, root);
-    if (!box) return false;
-    box.classList.add('bad');
-    $('em', box).textContent = text;
-    $('input', box).focus();
-    return true;
-  }
-
-  async function submit(e) {
-    e.preventDefault();
-    const form = e.target;
-    const signup = mode === 'register';
-    const login = form.elements.login.value.trim().toLowerCase();
-    const password = form.elements.password.value;
-    const name = form.elements.name?.value.trim();
-    if (signup && name.length < 2) return showError('name', t('e_name'));
-    if (!LOGIN.test(login)) return showError('login', t('loginRule'));
-    if (password.length < (signup ? 8 : 1)) return showError('password', t('passwordRule'));
-
-    const button = $('.btn.wide', form);
-    const errorBox = $('.form-error', form);
-    errorBox.textContent = '';
-    showPassword(form, false);
-    button.disabled = true;
-    try {
-      if (!crypto.subtle) throw new ApiError(0, 'insecure');
-      const key = await deriveKey(login, password);
-      const res = await api(`/auth/${signup ? 'register' : 'login'}`, { method: 'POST', body: { login, key, name } });
-      setSession(res);
-      toast(t('loggedIn'));
-      onDone(res.user);
-    } catch (err) {
-      button.disabled = false;
-      if (err.code === 'login_taken') return showError('login', errorText(err));
-      errorBox.textContent = errorText(err);
-    }
-  }
-
   draw();
+}
+
+// Смена пароля из профиля.
+export function passwordSheet(user) {
+  const s = sheet(
+    `<form class="form" novalidate>
+      <input type="text" autocomplete="username" value="${esc(user.login)}" hidden>
+      ${passwordField('password', t('fOldPassword'), 'current-password')}
+      ${passwordField('next', t('fNewPassword'), 'new-password', t('passwordRule'))}
+      <p class="form-error" role="alert"></p>
+      <button class="btn wide">${esc(t('changePassword'))}</button>
+    </form>`,
+    { title: t('changePassword') }
+  );
+  const form = $('form', s.body);
+  const { password, next } = form.elements;
+  bindForm(
+    form,
+    () => (!password.value ? ['password', t('enterPassword')] : next.value.length < MIN ? ['next', t('passwordRule')] : null),
+    async () => {
+      const [key, newKey] = await Promise.all([deriveKey(user.login, password.value), deriveKey(user.login, next.value)]);
+      await api('/auth/password', { method: 'POST', body: { key, newKey } });
+      s.close();
+      toast(t('passwordChanged'));
+    }
+  );
+}
+
+// Новый резервный код взамен прежнего.
+export function codeSheet(user, onDone) {
+  const s = sheet(
+    `<form class="form" novalidate>
+      <p>${esc(t(user.recovery ? 'codeReplace' : 'codeCreate'))}</p>
+      <input type="text" autocomplete="username" value="${esc(user.login)}" hidden>
+      ${passwordField('password', t('fPassword'), 'current-password')}
+      <p class="form-error" role="alert"></p>
+      <button class="btn wide">${esc(t('getCode'))}</button>
+    </form>`,
+    { title: t('codeTitle') }
+  );
+  const form = $('form', s.body);
+  const { password } = form.elements;
+  bindForm(
+    form,
+    () => (password.value ? null : ['password', t('enterPassword')]),
+    async () => {
+      const key = await deriveKey(user.login, password.value);
+      const { code } = await api('/auth/code', { method: 'POST', body: { key } });
+      codeView(s.body, code, () => {
+        s.close();
+        onDone();
+      });
+      $('h3', s.body).remove(); // заголовок уже есть у шторки
+    }
+  );
 }
 
 // Выполняет действие, при необходимости сначала предложив войти.

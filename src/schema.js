@@ -38,7 +38,8 @@ const STATEMENTS = [
     mime TEXT NOT NULL,
     full BLOB,
     thumb BLOB,
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    chat_id INTEGER
   )`,
   `CREATE INDEX IF NOT EXISTS photos_listing ON photos (listing_id, created_at)`,
   `CREATE TABLE IF NOT EXISTS reports (
@@ -50,7 +51,7 @@ const STATEMENTS = [
   )`,
   `CREATE TABLE IF NOT EXISTS bans (value TEXT PRIMARY KEY, created_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS rate (key TEXT PRIMARY KEY, count INTEGER NOT NULL, reset_at INTEGER NOT NULL)`,
-  `CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, username TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, login TEXT, pass_hash TEXT, pass_salt TEXT)`,
+  `CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, username TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, login TEXT, pass_hash TEXT, pass_salt TEXT, rec_hash TEXT, rec_salt TEXT)`,
   `CREATE TABLE IF NOT EXISTS sessions (hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at INTEGER NOT NULL)`,
   // Переписка: один диалог на пару «объявление + покупатель».
   `CREATE TABLE IF NOT EXISTS chats (
@@ -72,7 +73,8 @@ const STATEMENTS = [
     chat_id INTEGER NOT NULL,
     sender TEXT NOT NULL,
     text TEXT NOT NULL,
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    photo TEXT NOT NULL DEFAULT ''
   )`,
   `CREATE INDEX IF NOT EXISTS messages_chat ON messages (chat_id, id)`,
   `CREATE TABLE IF NOT EXISTS reviews (
@@ -83,13 +85,27 @@ const STATEMENTS = [
     created_at INTEGER NOT NULL,
     PRIMARY KEY (seller, author)
   )`,
+  `CREATE TABLE IF NOT EXISTS blocks (blocker TEXT NOT NULL, blocked TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (blocker, blocked))`,
+  // Жалоба на собеседника: модератор видит переписку, пока жалоба не разобрана.
+  `CREATE TABLE IF NOT EXISTS complaints (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    reporter TEXT NOT NULL,
+    target TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    comment TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    UNIQUE (chat_id, reporter)
+  )`,
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
 ];
 
 // Столбцы, которых нет в базах, созданных прежними версиями сайта.
 const COLUMNS = {
   listings: { old_price: 'INTEGER NOT NULL DEFAULT 0', area: "TEXT NOT NULL DEFAULT ''" },
-  users: { login: 'TEXT', pass_hash: 'TEXT', pass_salt: 'TEXT' },
+  users: { login: 'TEXT', pass_hash: 'TEXT', pass_salt: 'TEXT', rec_hash: 'TEXT', rec_salt: 'TEXT' },
+  photos: { chat_id: 'INTEGER' },
+  messages: { photo: "TEXT NOT NULL DEFAULT ''" },
 };
 
 async function migrate(env) {

@@ -2,15 +2,15 @@ import { api, config, currentUser, dropSession } from '../api.js';
 import { authForm } from '../auth.js';
 import { CATEGORIES, CITIES, CONDITIONS, LIMITS, PRICE_TYPES, normalizePhone } from '../catalog.js';
 import { icon } from '../icons.js';
-import { label, lang, t } from '../i18n.js';
+import { adsCount, label, lang, t } from '../i18n.js';
 import { compress, forAi } from '../images.js';
 import { store } from '../store.js';
-import { $, $$, areaOptions, emptyState, errorText, esc, phoneText, toast } from '../ui.js';
+import { $, $$, areaOptions, emptyState, errorText, esc, money, phoneText, toast } from '../ui.js';
 
 const digits = (v) => String(v ?? '').replace(/\D/g, '');
 const spaced = (v) => digits(v).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 
-export default async function post({ root, params, alive, go, back, rerender }) {
+export default async function post({ root, params, alive, go, back, rerender, onLeave }) {
   const editId = params[0] ? Number(params[0]) : null;
   const title = t(editId ? 'editTitle' : 'newTitle');
   const head = `<div class="page-head"><button class="icon-btn" data-back aria-label="${esc(t('back'))}">${icon('back')}</button><h1>${esc(title)}</h1></div>`;
@@ -81,6 +81,7 @@ export default async function post({ root, params, alive, go, back, rerender }) 
       <fieldset><legend>${esc(t('deal'))}</legend><div class="segs">${segs('priceType', PRICE_TYPES)}</div></fieldset>
       <label class="field" data-field="price"><span>${esc(t('fPrice'))}</span>
         <input class="input big" name="price" inputmode="numeric" value="${esc(values.price ? spaced(values.price) : '')}" maxlength="15"><em></em></label>
+      <div class="price-hint" aria-live="polite" hidden></div>
       <h2 class="form-title">${esc(t('sContacts'))}</h2>
       ${select('city', CITIES, t('city'))}
       <label class="field" data-field="area"><span>${esc(t('fArea'))}</span><select class="input" name="area"></select><em></em></label>
@@ -144,7 +145,52 @@ export default async function post({ root, params, alive, go, back, rerender }) 
     const category = CATEGORIES.find((c) => c.id === form.elements.category.value);
     $('[data-field="condition"]', form).hidden = category ? !category.goods : false;
     $('[data-field="price"]', form).hidden = form.elements.priceType.value === 'free';
+    askPrice();
   };
+
+  // За сколько такой же товар выставляют другие. Спрашиваем, когда человек перестал печатать.
+  const hint = $('.price-hint', form);
+  let asked = null;
+  let hintTimer;
+  onLeave(() => clearTimeout(hintTimer));
+  function askPrice() {
+    const f = form.elements;
+    const wanted = ['fixed', 'bargain'].includes(f.priceType.value) && f.category.value && f.title.value.trim().length >= LIMITS.titleMin;
+    const query = wanted
+      ? String(new URLSearchParams({ title: f.title.value.trim(), cat: f.category.value, cond: f.condition.value, exclude: editId || '' }))
+      : '';
+    if (query === asked) return;
+    asked = query;
+    clearTimeout(hintTimer);
+    hint.hidden = true;
+    if (!query) return;
+    hintTimer = setTimeout(async () => {
+      try {
+        const found = await api(`/price-hint?${query}`);
+        if (alive() && query === asked) drawHint(found);
+      } catch {
+        asked = null; // без подсказки можно обойтись; спросим при следующем изменении
+      }
+    }, 600);
+  }
+  function drawHint({ count, low, high, typical, otherCondition }) {
+    if (!count) return;
+    const range = low === high ? money(low) : `${money(low)} – ${money(high)}`;
+    hint.innerHTML = `
+      <p>${esc(t('priceHint'))} <strong>${esc(range)}</strong></p>
+      <small>${esc(
+        [typical && `${t('priceTypical')} ${money(typical)}`, `${t('priceBase')}: ${adsCount(count)}`, otherCondition && t('priceOtherState')]
+          .filter(Boolean)
+          .join('. ')
+      )}</small>
+      ${typical ? `<button type="button" class="btn small ghost">${esc(`${t('priceUse')} ${money(typical)}`)}</button>` : ''}`;
+    hint.hidden = false;
+    $('button', hint)?.addEventListener('click', () => {
+      form.elements.price.value = spaced(typical);
+      $('[data-field="price"]', form).classList.remove('bad');
+      saveDraft();
+    });
+  }
   sync();
 
   form.addEventListener('input', (e) => {
