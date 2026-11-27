@@ -2,10 +2,12 @@
 // Пароль на сервер не приходит: браузер прогоняет его через PBKDF2 (долгий расчёт, на воркере
 // он не уложился бы в лимит процессорного времени) и присылает ключ. В базе лежит только
 // солёный хеш этого ключа.
-import { fail, json, limit, now, randomHex, readJson, safeEqual, sha256 } from './util.js';
+import { attempt, fail, json, limit, now, randomHex, readJson, safeEqual, sha256 } from './util.js';
 
 const LOGIN = /^[a-z0-9_.]{3,24}$/;
 const KEY = /^[a-f0-9]{64}$/;
+// Вход забывается, если им столько не пользовались.
+export const SESSION_DAYS = 90;
 // Без букв O, I, L и U, чтобы код нельзя было переписать с ошибкой.
 const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
@@ -70,10 +72,14 @@ export async function signIn(request, env, who) {
   const { login, key } = await credentials(request);
   await limit(env, `signin:${who.ip}`, 30, 900);
   await limit(env, `signin:${login}:${who.ip}`, 10, 900);
+  // Подбор одного пароля со множества адресов: не больше 50 неудачных попыток в час на аккаунт.
+  // Владелец в это время может восстановить доступ резервным кодом.
+  const passed = await attempt(env, `signin-account:${login}`, 50, 3600);
   const user = await env.DB.prepare('SELECT id, name, login, pass_hash, pass_salt FROM users WHERE login = ?').bind(login).first();
   // Одинаковый ответ и для неизвестного логина, и для неверного пароля.
   const ok = await safeEqual(await sha256((user?.pass_salt || '') + key), user?.pass_hash || '');
   if (!user || !ok) fail(401, 'bad_credentials');
+  await passed();
   return open(env, who, user);
 }
 

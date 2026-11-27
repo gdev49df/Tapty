@@ -1,6 +1,7 @@
 // Черновик объявления по фото: Cloudflare Workers AI смотрит на снимок и предлагает поля.
 import { CATEGORIES, CONDITIONS, LIMITS } from '../public/js/catalog.js';
 import { DAY, HttpError, fail, json, limit, now } from './util.js';
+import { requireUser } from './auth.js';
 
 export const MODEL = '@cf/google/gemma-4-26b-a4b-it';
 const MAX_BYTES = 400_000;
@@ -105,7 +106,7 @@ const remember = (env, text) =>
 export async function draftFromPhoto(request, env, url, who) {
   if (!env.AI) fail(404, 'not_found');
   if (!who.owner) fail(401, 'no_key');
-  if (!who.user) fail(401, 'login_required');
+  await requireUser(env, who); // заблокированным нейросеть тоже недоступна
 
   if (Number(request.headers.get('content-length')) > MAX_BYTES) fail(413, 'photo_too_large');
   const image = new Uint8Array(await request.arrayBuffer());

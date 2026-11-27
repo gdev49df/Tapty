@@ -3,7 +3,7 @@ import {
 } from '../public/js/catalog.js';
 import { DAY, fail, json, limit, hit, normalizeText, now, readJson } from './util.js';
 import { deleteOrphans, deletePhotos } from './photos.js';
-import { requireUser } from './auth.js';
+import { SESSION_DAYS, requireUser } from './auth.js';
 import { rating, sellerReviews } from './reviews.js';
 import { needles, sameProduct, signature } from './same.js';
 
@@ -241,7 +241,9 @@ export async function getListing(env, ctx, id, { owner, ip }) {
 
 // Номер для звонка виден всем, а ссылки, чтобы написать, — только вошедшим.
 export async function getContact(env, id, { ip, user }) {
+  // номера не должны собираться пачками
   await limit(env, `contact:${ip}`, 120, 3600);
+  await limit(env, `contact-day:${ip}`, 400, DAY);
   const row = await findRow(env, id);
   if (publicStatus(row) !== 'active') fail(410, 'not_active');
   return json({
@@ -492,6 +494,7 @@ async function cleanup(env) {
   await deleteOrphans(env);
   await env.DB.batch([
     env.DB.prepare('DELETE FROM rate WHERE reset_at < ?').bind(t),
+    env.DB.prepare('DELETE FROM sessions WHERE created_at < ?').bind(t - SESSION_DAYS * DAY),
   ]);
   const { results } = await env.DB.prepare(
     "SELECT * FROM listings WHERE status != 'hidden' AND expires_at < CASE status WHEN 'sold' THEN ? ELSE ? END LIMIT 5"

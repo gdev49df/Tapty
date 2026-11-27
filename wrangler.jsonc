@@ -3,6 +3,8 @@
   "name": "tapty",
   "main": "src/worker.js",
   "compatibility_date": "2026-11-01",
+  // Адреса прежних версий открывали бы старый код с той же базой.
+  "preview_urls": false,
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",

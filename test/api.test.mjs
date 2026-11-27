@@ -9,6 +9,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { localConfigs } from './local.mjs';
 import { parseDraft } from '../src/ai.js';
+import { network } from '../src/util.js';
 import { sameProduct, signature } from '../src/same.js';
 
 const PORT = 8799;
@@ -74,13 +75,16 @@ async function signUp(name, { guest = key(), login = `user_${++logins}`, ip } = 
 
 // База в том виде, в каком её оставила прежняя версия сайта: проверяем, что она обновится сама.
 const oldGuest = key();
-function prepareOldDatabase() {
+function runD1(args) {
   const [cmd, ...pre] = wrangler.split(' ');
   const [, config] = localConfigs();
+  execFileSync(cmd, [...pre, 'd1', 'execute', 'tapty', '--local', '--persist-to', state, '-c', config, '-y', ...args], { stdio: 'pipe' });
+}
+const runSql = (sql) => runD1(['--command', sql]);
+function prepareOldDatabase() {
   const owner = `d:${createHash('sha256').update(oldGuest).digest('hex')}`;
-  const run = (args) => execFileSync(cmd, [...pre, 'd1', 'execute', 'tapty', '--local', '--persist-to', state, '-c', config, '-y', ...args], { stdio: 'pipe' });
-  run(['--file', fileURLToPath(new URL('old-schema.sql', import.meta.url))]);
-  run(['--command', `UPDATE listings SET owner = '${owner}'`]);
+  runD1(['--file', fileURLToPath(new URL('old-schema.sql', import.meta.url))]);
+  runSql(`UPDATE listings SET owner = '${owner}'`);
 }
 
 const listing = (over = {}) => ({
@@ -741,6 +745,72 @@ try {
     assert.deepEqual((await fav(other, `/${two}`, 'DELETE')).data.ids, [one]);
     await call(`/api/listings/${one}`, { token: owner, method: 'DELETE' });
     assert.deepEqual([(await fav(fan)).data.ids, (await fav(other)).data.ids], [[], []]);
+  });
+
+  await test('защитные заголовки у страниц, ответов и фото', async () => {
+    const owner = await signUp('Заголовки', { ip: '203.0.113.40' });
+    const photoId = (await upload(owner)).data.id;
+    await create(owner, { title: 'Лампа настольная', phone: '77090000001', photos: [photoId] });
+    const item = (await call('/api/listings')).data.items[0].id;
+    for (const path of ['/', '/search', `/item/${item}`, '/js/app.js', '/api/config', `/p/${photoId}`, '/api/nothing']) {
+      const r = await fetch(BASE + path);
+      assert.equal(r.headers.get('x-content-type-options'), 'nosniff', path);
+      assert.match(r.headers.get('strict-transport-security') || '', /max-age=31536000/, path);
+      assert.ok(r.headers.get('content-security-policy'), path);
+    }
+    assert.match((await fetch(`${BASE}/`)).headers.get('content-security-policy'), /script-src 'self';.*frame-ancestors 'none'/);
+    const photo = await fetch(`${BASE}/p/${photoId}?x=1`);
+    assert.match(photo.headers.get('content-security-policy'), /sandbox/);
+    assert.match(photo.headers.get('cache-control'), /s-maxage=86400/);
+  });
+
+  await test('большое тело запроса отклоняется', async () => {
+    const r = await call('/api/auth/login', { method: 'POST', body: { login: 'a'.repeat(200_000) } });
+    assert.equal(r.data.error, 'too_large');
+  });
+
+  await test('сети IPv6 считаются целиком', async () => {
+    assert.equal(network('203.0.113.7'), '203.0.113.7');
+    assert.equal(network('2001:db8:1:2:aaaa:bbbb:cccc:dddd'), network('2001:0db8:0001:0002::1'));
+    assert.notEqual(network('2001:db8:1:2::1'), network('2001:db8:1:3::1'));
+    assert.equal(network('2001:db8::1'), network('2001:db8:0:0:9::'));
+  });
+
+  await test('пароль одного аккаунта нельзя перебирать со многих адресов', async () => {
+    const password = key();
+    const login = 'brute_target';
+    const send = (secret, ip) =>
+      call('/api/auth/login', { token: key(), method: 'POST', body: { login, key: secret }, headers: { 'cf-connecting-ip': ip } });
+    await call('/api/auth/register', { token: key(), method: 'POST', body: { login, name: 'Цель', key: password }, headers: { 'cf-connecting-ip': '198.51.100.1' } });
+    // удачные входы в счёт не идут
+    for (let i = 0; i < 3; i++) assert.equal((await send(password, '198.51.100.2')).status, 200);
+    for (let i = 0; i < 50; i++) assert.equal((await send(key(), `198.51.101.${Math.floor(i / 5) + 1}`)).status, 401, `попытка ${i}`);
+    assert.equal((await send(password, '198.51.100.3')).data.error, 'rate_limit');
+  });
+
+  await test('ключ админки нельзя подбирать, даже угадав после предела', async () => {
+    const send = (secret, ip) =>
+      call('/api/admin/reports', { headers: { 'x-admin-key': encodeURIComponent(secret), 'cf-connecting-ip': ip } });
+    for (let i = 0; i < 25; i++) assert.equal((await send('секрет-админа', '192.0.2.10')).status, 200);
+    const burst = await Promise.all(Array.from({ length: 30 }, () => send('мимо', '2001:db8:5:5::1')));
+    assert.equal(burst.filter((r) => r.status === 403).length, 20);
+    assert.equal(burst.filter((r) => r.status === 429).length, 10);
+    // другой адрес той же сети /64 тоже закрыт, остальные — нет
+    assert.equal((await send('секрет-админа', '2001:db8:5:5:ffff::2')).status, 429);
+    assert.equal((await send('секрет-админа', '192.0.2.11')).status, 200);
+  });
+
+  await test('вход забывается после долгого простоя', async () => {
+    const stale = await signUp('Давно не был', { ip: '203.0.113.50' });
+    const fresh = await signUp('Был вчера', { ip: '203.0.113.50' });
+    const hash = (token) => createHash('sha256').update(token).digest('hex');
+    const past = (days) => Math.floor(Date.now() / 1000) - days * 86400;
+    await stop();
+    runSql(`UPDATE sessions SET created_at = ${past(91)} WHERE hash = '${hash(stale)}'`);
+    runSql(`UPDATE sessions SET created_at = ${past(30)} WHERE hash = '${hash(fresh)}'`);
+    await start({ ADMIN_KEY: 'секрет-админа' });
+    assert.equal((await call('/api/me', { token: stale })).data.user, null);
+    assert.equal((await call('/api/me', { token: fresh })).data.user.name, 'Был вчера');
   });
 
   console.log(`\nвсе проверки пройдены: ${passed}`);

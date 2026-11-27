@@ -13,19 +13,29 @@ export const fail = (status, code, field) => {
   throw new HttpError(status, code, field);
 };
 
+// Заголовки для ответов воркера. Статическим файлам такие же задаёт public/_headers.
+export const GUARD = {
+  'x-content-type-options': 'nosniff',
+  'strict-transport-security': 'max-age=31536000',
+  'referrer-policy': 'strict-origin-when-cross-origin',
+};
+
 export function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
       'content-type': 'application/json; charset=utf-8',
       'cache-control': 'no-store',
-      'x-content-type-options': 'nosniff',
+      'content-security-policy': "default-src 'none'; frame-ancestors 'none'",
+      ...GUARD,
       ...headers,
     },
   });
 }
 
 export async function readJson(request, max = 20_000) {
+  // заведомо огромное тело отклоняется, не читая; символ в UTF-8 занимает до 4 байт
+  if (Number(request.headers.get('content-length')) > max * 4) fail(413, 'too_large');
   const text = await request.text();
   if (text.length > max) fail(413, 'too_large');
   try {
@@ -72,4 +82,19 @@ export async function hit(env, key, limit, windowSec) {
 
 export async function limit(env, key, max, windowSec) {
   if (!(await hit(env, key, max, windowSec))) fail(429, 'rate_limit');
+}
+
+// То же для проверки секрета: место занимается до проверки, чтобы пачка одновременных попыток
+// не обошла предел, и возвращается при удаче — так считаются только неудачные.
+export async function attempt(env, key, max, windowSec) {
+  await limit(env, key, max, windowSec);
+  return () => env.DB.prepare('UPDATE rate SET count = count - 1 WHERE key = ?').bind(key).run();
+}
+
+// Для лимитов по адресу: у IPv6 один абонент получает целую сеть /64, поэтому считаем по ней.
+export function network(ip) {
+  if (!ip.includes(':') || ip.includes('.')) return ip;
+  const [head, tail] = ip.split('::').map((part) => (part ? part.split(':') : []));
+  const groups = tail ? [...head, ...Array(Math.max(0, 8 - head.length - tail.length)).fill('0'), ...tail] : head;
+  return groups.slice(0, 4).map((g) => parseInt(g, 16).toString(16)).join(':');
 }

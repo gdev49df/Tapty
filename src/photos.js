@@ -1,7 +1,7 @@
 // Фото лежат в D1. Если подключить R2 с биндингом PHOTOS, новые фото пойдут туда,
 // а старые продолжат отдаваться из базы.
 import { LIMITS } from '../public/js/catalog.js';
-import { DAY, fail, json, limit, now, randomHex } from './util.js';
+import { DAY, GUARD, fail, json, limit, now, randomHex } from './util.js';
 
 function sniff(bytes) {
   if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
@@ -23,6 +23,9 @@ async function readPart(form, name, max) {
 export async function uploadPhoto(request, env, { owner, ip }) {
   await limit(env, `up:${ip}`, 200, 3600);
   await limit(env, `up:${owner}`, 60, 3600);
+  // место в базе ограничено, поэтому есть и суточные пределы
+  await limit(env, `up-day:${owner}`, 150, DAY);
+  await limit(env, `up-day:${ip}`, 400, DAY);
   return json({ id: await storePhoto(request, env, owner) }, 201);
 }
 
@@ -56,13 +59,22 @@ export async function photoResponse(env, id, variant, row, cache) {
   else if (env.PHOTOS) body = (await env.PHOTOS.get(`${id}/${column}`))?.body;
   if (!body) return null;
   return new Response(body, {
-    headers: { 'content-type': row.mime, 'cache-control': cache, 'x-content-type-options': 'nosniff' },
+    headers: {
+      'content-type': row.mime,
+      'cache-control': cache,
+      // даже если под видом снимка загрузят что-то другое, браузер это не выполнит
+      'content-security-policy': "default-src 'none'; sandbox",
+      ...GUARD,
+    },
   });
 }
 
 export async function servePhoto(request, env, ctx, id, variant) {
   const cache = caches.default;
-  const cached = await cache.match(request);
+  // приписки после «?» не должны плодить копии в кеше
+  const url = new URL(request.url);
+  const key = new Request(url.origin + url.pathname);
+  const cached = await cache.match(key);
   if (cached) return cached;
 
   const column = variant === 'thumb' ? 'thumb' : 'full';
@@ -70,9 +82,10 @@ export async function servePhoto(request, env, ctx, id, variant) {
   const row = await env.DB.prepare(`SELECT mime, ${column} AS data FROM photos WHERE id = ? AND chat_id IS NULL`)
     .bind(id)
     .first();
-  const response = row && (await photoResponse(env, id, variant, row, 'public, max-age=31536000, immutable'));
+  // На краю сети копия живёт сутки, чтобы удалённое фото не раздавалось оттуда целый год.
+  const response = row && (await photoResponse(env, id, variant, row, 'public, max-age=31536000, s-maxage=86400, immutable'));
   if (!response) return new Response('Not found', { status: 404 });
-  ctx.waitUntil(cache.put(request, response.clone()));
+  ctx.waitUntil(cache.put(key, response.clone()));
   return response;
 }
 

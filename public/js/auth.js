@@ -7,6 +7,24 @@ import { $, $$, errorText, esc, sheet, toast } from './ui.js';
 const LOGIN = /^[a-z0-9_.]{3,24}$/;
 const MIN = 8;
 
+const COMMON = new Set([
+  '12345678', '123456789', '1234567890', '123123123', '12341234', '87654321', '11223344', 'password', 'password1', 'password123',
+  'qwerty12', 'qwerty123', 'qwertyui', 'qwertyuiop', '1q2w3e4r', '1q2w3e4r5t', '1qaz2wsx', 'qazwsxedc', 'asdfghjk', 'abc12345',
+  'iloveyou', 'admin123', 'astana123', 'almaty123', 'kazakhstan', 'qazaqstan', 'йцукенгш', 'пароль123',
+]);
+
+// Пароли, которые подбирают первыми. Проверить это может только браузер: сервер пароля не видит.
+export function weakPassword(login, password) {
+  const p = password.toLowerCase();
+  return (
+    COMMON.has(p) ||
+    /^(.)\1+$/.test(p) ||
+    '01234567890123456789'.includes(p) ||
+    '98765432109876543210'.includes(p) ||
+    (p.startsWith(login) && /^\d{0,4}$/.test(p.slice(login.length)))
+  );
+}
+
 // Пароль не уходит из браузера: на сервер отправляется ключ, посчитанный из пароля и логина.
 async function deriveKey(login, password) {
   if (!crypto.subtle) throw new ApiError(0, 'insecure');
@@ -163,7 +181,9 @@ export function authForm(root, { onDone, note = '', mode = 'login' }) {
         if (signup && value('name').length < 2) return ['name', t('e_name')];
         if (!LOGIN.test(value('login').toLowerCase())) return ['login', t('loginRule')];
         if (recovering && value('code').replace(/[^0-9a-z]/gi, '').length !== 16) return ['code', t('codeRule')];
-        if (form.elements.password.value.length < (mode === 'login' ? 1 : MIN)) return ['password', t('passwordRule')];
+        const { value: password } = form.elements.password;
+        if (password.length < (mode === 'login' ? 1 : MIN)) return ['password', t('passwordRule')];
+        if (mode !== 'login' && weakPassword(value('login').toLowerCase(), password)) return ['password', t('passwordWeak')];
         return null;
       },
       async () => {
@@ -197,7 +217,11 @@ export function passwordSheet(user) {
   const { password, next } = form.elements;
   bindForm(
     form,
-    () => (!password.value ? ['password', t('enterPassword')] : next.value.length < MIN ? ['next', t('passwordRule')] : null),
+    () => {
+      if (!password.value) return ['password', t('enterPassword')];
+      if (next.value.length < MIN) return ['next', t('passwordRule')];
+      return weakPassword(user.login, next.value) ? ['next', t('passwordWeak')] : null;
+    },
     async () => {
       const [key, newKey] = await Promise.all([deriveKey(user.login, password.value), deriveKey(user.login, next.value)]);
       await api('/auth/password', { method: 'POST', body: { key, newKey } });

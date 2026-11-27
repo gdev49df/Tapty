@@ -1,8 +1,8 @@
 import { ensureSchema } from './schema.js';
-import { HttpError, fail, json, limit, randomHex, safeEqual, sha256 } from './util.js';
+import { DAY, HttpError, attempt, fail, json, network, now, randomHex, safeEqual, sha256 } from './util.js';
 import * as listings from './listings.js';
 import { servePhoto, uploadPhoto } from './photos.js';
-import { changePassword, recover, register, replaceCode, requireUser, signIn, signOut } from './auth.js';
+import { SESSION_DAYS, changePassword, recover, register, replaceCode, requireUser, signIn, signOut } from './auth.js';
 import * as chat from './chat.js';
 import * as reviews from './reviews.js';
 import * as favorites from './favorites.js';
@@ -15,27 +15,33 @@ async function ipHash(request, env) {
     await env.DB.prepare("INSERT OR IGNORE INTO meta (key, value) VALUES ('salt', ?)").bind(randomHex(24)).run();
     salt = (await env.DB.prepare("SELECT value FROM meta WHERE key = 'salt'").first()).value;
   }
-  return 'ip:' + (await sha256(salt + (request.headers.get('cf-connecting-ip') || 'local'))).slice(0, 32);
+  return 'ip:' + (await sha256(salt + network(request.headers.get('cf-connecting-ip') || 'local'))).slice(0, 32);
 }
 
 // Кто делает запрос: вошедший пользователь или ключ устройства из браузера.
-async function identify(request, env) {
+async function identify(request, env, ctx) {
   const token = /^Bearer ([a-f0-9]{64})$/.exec(request.headers.get('authorization') || '')?.[1];
   const ip = await ipHash(request, env);
   if (!token) return { ip, owner: null, user: null };
   const hash = await sha256(token);
+  const t = now();
   const user = await env.DB.prepare(
-    'SELECT u.id, u.name, u.login, u.rec_hash IS NOT NULL AS recovery FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.hash = ? AND u.login IS NOT NULL'
+    `SELECT u.id, u.name, u.login, u.rec_hash IS NOT NULL AS recovery, s.created_at AS seen
+     FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.hash = ? AND s.created_at > ? AND u.login IS NOT NULL`
   )
-    .bind(hash)
+    .bind(hash, t - SESSION_DAYS * DAY)
     .first();
+  // created_at сессии — когда ею пользовались в последний раз, с точностью до суток.
+  if (user && user.seen < t - DAY) {
+    ctx.waitUntil(env.DB.prepare('UPDATE sessions SET created_at = ? WHERE hash = ?').bind(t, hash).run());
+  }
   return { ip, hash, user, owner: user ? user.id : `d:${hash}` };
 }
 
 async function api(request, env, ctx, url) {
   const method = request.method;
   const path = url.pathname.slice(4);
-  const who = await identify(request, env);
+  const who = await identify(request, env, ctx);
   let m;
 
   if (method === 'GET' && path === '/config') return json({ ai: Boolean(env.AI) });
@@ -118,10 +124,10 @@ async function api(request, env, ctx, url) {
     try {
       given = decodeURIComponent(given);
     } catch {}
-    if (!(await safeEqual(given, env.ADMIN_KEY))) {
-      await limit(env, `admin:${who.ip}`, 20, 3600);
-      fail(403, 'forbidden');
-    }
+    // После 20 неверных ключей за час с адреса не принимается и верный.
+    const passed = await attempt(env, `admin:${who.ip}`, 20, 3600);
+    if (!(await safeEqual(given, env.ADMIN_KEY))) fail(403, 'forbidden');
+    await passed();
     if (method === 'GET' && path === '/admin/reports') return listings.adminReports(env);
     if (method === 'GET' && path === '/admin/complaints') return chat.adminComplaints(env);
     if (method === 'GET' && (m = /^\/admin\/chat-photos\/([a-f0-9]{24})$/.exec(path))) return chat.adminChatPhoto(env, m[1]);
