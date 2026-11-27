@@ -58,9 +58,9 @@ h2 { font-size: 18px; line-height: 1.35; font-weight: 600; }
 #view { padding: var(--safe-t) 16px calc(var(--tabs) + var(--safe-b) + 32px); max-width: 1180px; margin: 0 auto; }
 .has-footer #view { min-height: 100dvh; padding-bottom: 48px; }
 
-/* ---------- логотип: бирка и название ---------- */
+/* ---------- логотип: пакет с тенге и название ---------- */
 .logo { display: inline-flex; align-items: center; gap: 8px; font-weight: 800; font-size: 24px; letter-spacing: -.045em; line-height: 1; }
-.logo::before { content: ''; width: 1.05em; height: 1.05em; flex: none; background: url('/icons/mark.svg') center / contain no-repeat; }
+.logo::before { content: ''; width: 1.15em; height: 1.15em; flex: none; background: url('/icons/mark.svg') center / contain no-repeat; }
 
 /* ---------- нижнее меню ---------- */
 #tabs { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(5, 1fr); height: calc(var(--tabs) + var(--safe-b)); padding-bottom: var(--safe-b); background: var(--bg); border-top: 1px solid var(--line); }
