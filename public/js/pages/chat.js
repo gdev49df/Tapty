@@ -1,7 +1,7 @@
 // Один диалог. Новые сообщения подтягиваются раз в несколько секунд, пока страница открыта.
 import { api, apiBlob, auth } from '../api.js';
-import { authForm, consentSheet } from '../auth.js';
-import { CHAT_REASONS, LIMITS } from '../catalog.js';
+import { authForm } from '../auth.js';
+import { CHAT_REASONS } from '../catalog.js';
 import { compress } from '../images.js';
 import { icon } from '../icons.js';
 import { t } from '../i18n.js';
@@ -9,7 +9,6 @@ import { askDeleteChat } from '../dialogs.js';
 import { reviewForm } from '../reviews.js';
 import { refreshUnread } from '../unread.js';
 import { openViewer } from '../viewer.js';
-import { canRecord, clock, createPlayer, startRecording, voiceHtml } from '../voice.js';
 import { $, $$, dateText, emptyState, errorText, esc, money, priceText, priceWords, sheet, timeText, toast } from '../ui.js';
 
 const EVERY = 4000;
@@ -62,15 +61,8 @@ export default async function chatPage({ root, params, alive, back, go, rerender
         <button type="button" class="attach" aria-label="${esc(t('attachPhoto'))}">${icon('camera')}</button>
         <input type="file" accept="image/*" multiple hidden>
         <textarea class="input" rows="1" maxlength="1000" enterkeyhint="send" aria-label="${esc(t('chatInput'))}" placeholder="${esc(t('chatInput'))}"></textarea>
-        <button type="button" class="btn" data-mic aria-label="${esc(t('voiceRecord'))}">${icon('mic')}</button>
-        <button class="btn" data-send aria-label="${esc(t('sendMessage'))}">${icon('send')}</button>
+        <button class="btn" aria-label="${esc(t('sendMessage'))}">${icon('send')}</button>
       </form>
-      <div class="recorder" hidden>
-        <button type="button" class="icon-btn" data-drop aria-label="${esc(t('voiceCancel'))}">${icon('trash')}</button>
-        <p role="status"><i></i><span></span></p>
-        <time></time>
-        <button type="button" class="btn" data-voice-send aria-label="${esc(t('sendMessage'))}">${icon('send')}</button>
-      </div>
     </div>`;
   $('[data-back]', root).onclick = back;
   const list = $('.messages', root);
@@ -112,7 +104,6 @@ export default async function chatPage({ root, params, alive, back, go, rerender
 
   const bodyHtml = (m) => {
     if (m.photo) return `<button type="button" class="msg-photo" data-photo="${esc(m.photo)}" aria-label="${esc(t('openPhoto'))}"><img alt="${esc(t('photoMessage'))}"></button>`;
-    if (m.voice) return voiceHtml(m);
     if (m.kind === 'offer') return offerHtml(m);
     return `<p>${esc(m.kind ? priceWords(m.kind, m.amount) : m.text)}</p>`;
   };
@@ -129,7 +120,6 @@ export default async function chatPage({ root, params, alive, back, go, rerender
         return `${divider}<div class="msg${m.mine ? ' mine' : ''}">${bodyHtml(m)}<small>${esc(timeText(m.at) + state)}</small></div>`;
       })
       .join('');
-    player.paint();
     $$('[data-photo]', list).forEach(async (button) => {
       try {
         const url = await picture(button.dataset.photo, '/t');
@@ -177,8 +167,7 @@ export default async function chatPage({ root, params, alive, back, go, rerender
   function drawState() {
     const box = $('.chat-closed', root);
     box.hidden = chat.canWrite;
-    if (!chat.canWrite) dropRecording();
-    form.hidden = !chat.canWrite || Boolean(recording);
+    form.hidden = !chat.canWrite;
     box.innerHTML = chat.canWrite
       ? ''
       : `<p>${esc(t(chat.blockedByMe ? 'youBlocked' : 'err_blocked'))}</p>${
@@ -306,125 +295,9 @@ export default async function chatPage({ root, params, alive, back, go, rerender
     return added.length;
   }
 
-  const mic = $('[data-mic]', form);
-  const send = $('[data-send]', form);
-  const bar = $('.recorder', root);
-  let recording = null; // { recorder, result }
-  let starting = false;
-  const player = createPlayer(list, (voice) => picture(voice), (err) => alive() && toast(err.code ? errorText(err) : t('voiceNoPlay')));
-  onLeave(() => {
-    player.pause();
-    dropRecording();
-  });
-
-  // Пока в поле пусто, на месте отправки — микрофон.
-  const chooseButton = () => {
-    mic.hidden = !canRecord() || Boolean(input.value.trim());
-    send.hidden = !mic.hidden;
-  };
-
-  function showRecorder(on) {
-    bar.hidden = !on;
-    form.hidden = on || !chat.canWrite;
-  }
-
-  function dropRecording() {
-    const old = recording;
-    recording = null;
-    old?.recorder?.stop();
-    if (old && alive()) showRecorder(false);
-  }
-
-  async function record() {
-    if (starting || recording) return;
-    starting = true;
-    player.pause();
-    const mine = { recorder: null };
-    const status = (key) => ($('p span', bar).textContent = t(key));
-    const time = (seconds) => ($('time', bar).textContent = `${clock(seconds)} / ${clock(LIMITS.voiceSeconds)}`);
-    try {
-      const recorder = await startRecording({
-        onTick: (seconds) => recording === mine && time(seconds),
-        onEnd: () => {
-          if (recording !== mine) return;
-          bar.classList.add('ready');
-          status('voiceReady');
-        },
-      });
-      // пока спрашивали разрешение, могли уйти из диалога
-      if (!alive() || !chat.canWrite) return recorder.stop();
-      mine.recorder = recorder;
-      recording = mine;
-      bar.classList.remove('ready');
-      status('voiceRecording');
-      time(0);
-      showRecorder(true);
-      $('[data-voice-send]', bar).focus({ preventScroll: true });
-    } catch (e) {
-      if (alive()) toast(t({ NotAllowedError: 'micDenied', SecurityError: 'micDenied', NotFoundError: 'micMissing' }[e.name] || 'voiceFailed'));
-    } finally {
-      starting = false;
-    }
-  }
-  mic.onclick = () => {
-    if (!chat.needConsent) return record();
-    consentSheet(() => {
-      chat.needConsent = false;
-      record();
-    });
-  };
-  $('[data-drop]', bar).onclick = () => {
-    dropRecording();
-    mic.focus({ preventScroll: true });
-  };
-  $('[data-voice-send]', bar).onclick = async (e) => {
-    const button = e.currentTarget;
-    const mine = recording;
-    if (!mine || button.disabled) return;
-    const drop = $('[data-drop]', bar);
-    // пока запись отправляется, удалить её уже нельзя
-    button.disabled = drop.disabled = true;
-    try {
-      const { blob, seconds } = await mine.recorder.stop();
-      if (!blob.size) {
-        dropRecording();
-        toast(t('voiceFailed'));
-      } else {
-        const body = new FormData();
-        body.set('voice', blob, 'voice');
-        body.set('seconds', seconds);
-        const { message } = await api(`/chats/${id}/voice`, { method: 'POST', body });
-        if (!alive()) return;
-        // своя запись уже есть в памяти
-        pictures.set(message.voice, Promise.resolve(URL.createObjectURL(blob)));
-        if (recording === mine) {
-          recording = null;
-          showRecorder(false);
-        }
-        add([message]);
-        draw();
-        toEnd();
-      }
-    } catch (err) {
-      if (!alive()) return;
-      if (err.code === 'login_required') return login();
-      // запись остаётся: можно отправить ещё раз
-      if (err.code === 'consent_needed') consentSheet(() => (chat.needConsent = false));
-      else toast(errorText(err));
-      if (err.code === 'blocked' || err.code === 'you_blocked') poll();
-    } finally {
-      button.disabled = drop.disabled = false;
-    }
-  };
-  // Свернули приложение — запись останавливается, микрофон не остаётся включённым.
-  const hidden = () => document.visibilityState === 'hidden' && recording?.recorder.stop();
-  document.addEventListener('visibilitychange', hidden);
-  onLeave(() => document.removeEventListener('visibilitychange', hidden));
-
   draw();
   drawReview();
   drawState();
-  chooseButton();
   // Роутер после отрисовки прокручивает наверх, поэтому к последнему сообщению переходим кадром позже.
   requestAnimationFrame(() => alive() && toEnd());
   refreshUnread();
@@ -476,7 +349,6 @@ export default async function chatPage({ root, params, alive, back, go, rerender
   const resize = () => {
     input.style.height = 'auto';
     input.style.height = `${Math.min(input.scrollHeight + 2, 140)}px`;
-    chooseButton();
   };
   input.addEventListener('input', resize);
   input.addEventListener('keydown', (e) => {
@@ -525,7 +397,7 @@ export default async function chatPage({ root, params, alive, back, go, rerender
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const text = input.value.trim();
-    const button = send;
+    const button = $('.btn', form);
     if (!text || button.disabled) return input.focus();
     button.disabled = true;
     try {

@@ -440,28 +440,6 @@ body[data-page='chat'] #view { padding-bottom: 0; }
 .offer[data-state='accepted'] em { color: var(--ok); font-weight: 600; }
 .offer[data-state='declined'] em { color: var(--danger); font-weight: 600; }
 .offer .row { gap: 8px; margin-top: 8px; }
-/* голосовое сообщение */
-.voice { display: flex; align-items: center; gap: 12px; width: 240px; max-width: 100%; padding: 8px 12px 8px 8px; border-radius: 4px 16px 16px 16px; background: var(--surface); }
-.voice button { display: grid; place-items: center; flex: none; width: 40px; height: 40px; border-radius: 50%; background: var(--accent); color: #fff; }
-.voice button .i { width: 16px; height: 16px; fill: currentColor; }
-.voice progress { flex: 1; min-width: 0; height: 4px; appearance: none; -webkit-appearance: none; border: 0; border-radius: 2px; overflow: hidden; background: var(--line); }
-.voice progress::-webkit-progress-bar { background: var(--line); }
-.voice progress::-webkit-progress-value { background: var(--accent); }
-.voice progress::-moz-progress-bar { background: var(--accent); }
-.voice span { font-size: 13px; font-variant-numeric: tabular-nums; }
-.msg.mine .voice { border-radius: 16px 4px 16px 16px; background: var(--accent); color: #fff; }
-.msg.mine .voice button { background: #fff; color: var(--accent); }
-.msg.mine .voice progress, .msg.mine .voice progress::-webkit-progress-bar { background: rgba(255, 255, 255, .35); }
-.msg.mine .voice progress::-webkit-progress-value { background: #fff; }
-.msg.mine .voice progress::-moz-progress-bar { background: #fff; }
-/* полоса записи на месте поля ввода */
-.recorder { position: sticky; bottom: 0; display: flex; align-items: center; gap: 8px; padding: 12px 0 calc(12px + var(--safe-b)); background: var(--bg); border-top: 1px solid var(--line); }
-.recorder .icon-btn { color: var(--muted); }
-.recorder p { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; font-size: 14px; line-height: 1.3; }
-.recorder i { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--danger); animation: pulse 1s ease-in-out infinite alternate; }
-.recorder.ready i { background: var(--muted); animation: none; }
-.recorder time { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.recorder .btn { flex: none; width: 48px; padding: 0; }
 .chat-head { display: flex; align-items: center; gap: 8px; }
 .chat-head .page-head { flex: 1; min-width: 0; }
 .chat-head > .icon-btn { margin-right: -12px; }

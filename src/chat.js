@@ -1,9 +1,9 @@
 // Переписка покупателя и продавца внутри сайта.
-import { CHAT_REASONS, LEGAL_VERSION, LIMITS } from '../public/js/catalog.js';
+import { CHAT_REASONS, LIMITS } from '../public/js/catalog.js';
 import { fail, json, limit, now, readJson } from './util.js';
 import { requireUser } from './auth.js';
 import { canReview } from './reviews.js';
-import { photoResponse, storePhoto, storeVoice } from './photos.js';
+import { photoResponse, storePhoto } from './photos.js';
 import { banSeller } from './listings.js';
 
 const MAX = 1000;
@@ -21,15 +21,14 @@ const priceMessage = (kind, amount) => ({ kind, amount, text: `${PRICE_WORDS[kin
 
 const view = (m, me) => ({
   id: m.id, mine: m.sender === me, text: m.text, photo: m.photo, kind: m.kind, amount: m.amount, state: m.state,
-  voice: m.voice, seconds: m.seconds, at: m.created_at,
+  at: m.created_at,
 });
 
-async function add(env, chat, me, { text = '', photo = '', kind = '', amount = 0, voice = '', seconds = 0 }) {
+async function add(env, chat, me, { text = '', photo = '', kind = '', amount = 0 }) {
   const row = await env.DB.prepare(
-    `INSERT INTO messages (chat_id, sender, text, created_at, photo, kind, amount, voice, seconds)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`
+    'INSERT INTO messages (chat_id, sender, text, created_at, photo, kind, amount) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *'
   )
-    .bind(chat.id, me, text, now(), photo, kind, amount, voice, seconds)
+    .bind(chat.id, me, text, now(), photo, kind, amount)
     .first();
   // Своё сообщение, а значит и всё до него, уже прочитано.
   const column = chat.buyer === me ? 'buyer_read' : 'seller_read';
@@ -142,22 +141,6 @@ export async function sendPhoto(request, env, id, who) {
   return json({ message: await add(env, chat, who.owner, { photo }) }, 201);
 }
 
-export async function sendVoice(request, env, id, who) {
-  const user = await requireUser(env, who);
-  // голос — новые сведения о человеке: сначала он должен принять действующую редакцию согласия
-  if (user.consent !== LEGAL_VERSION) fail(403, 'consent_needed');
-  const chat = await findChat(env, id, who.owner);
-  await assertOpen(env, who.owner, otherOf(chat, who.owner));
-  await limit(env, `msg:${who.owner}`, 30, 60);
-  await limit(env, `chatvoice:${who.owner}`, 40, 86400);
-  if (Number(request.headers.get('content-length') || 0) > LIMITS.voiceBytes + 10_000) fail(413, 'voice_too_large');
-  const form = await request.formData().catch(() => fail(400, 'bad_voice'));
-  const seconds = Number(form.get('seconds'));
-  if (!Number.isInteger(seconds) || seconds < 1 || seconds > LIMITS.voiceSeconds) fail(400, 'bad_voice');
-  const voice = await storeVoice(env, form.get('voice'), who.owner, id);
-  return json({ message: await add(env, chat, who.owner, { voice, seconds }) }, 201);
-}
-
 export async function chatPhoto(env, id, photo, variant, who) {
   if (!who.user) fail(401, 'login_required');
   await findChat(env, id, who.owner);
@@ -248,7 +231,7 @@ export async function listChats(env, who) {
   if (!who.user) fail(401, 'login_required');
   const { results } = await env.DB.prepare(
     `SELECT c.id, c.title AS saved_title, c.buyer, c.updated_at, u.name AS other, l.title, l.photos,
-       last.text AS last, last.sender AS last_sender, last.kind, last.amount, last.voice,
+       last.text AS last, last.sender AS last_sender, last.kind, last.amount,
        EXISTS (SELECT 1 FROM blocks WHERE blocker = ?1 AND blocked = u.id) AS blocked,
        (SELECT COUNT(*) FROM messages m WHERE m.chat_id = c.id AND ${UNREAD}) AS unread,
        ${MINE('pinned')} AS pinned
@@ -271,7 +254,6 @@ export async function listChats(env, who) {
       last: r.last,
       lastKind: r.kind,
       lastAmount: r.amount,
-      lastVoice: Boolean(r.voice),
       lastMine: r.last_sender === who.owner,
       unread: r.unread,
       blocked: Boolean(r.blocked),
@@ -324,8 +306,6 @@ export async function getChat(env, url, id, who) {
       blockedByMe: blocks.byMe,
       pinned: Boolean(chat[`${mine}_pinned`]),
       canWrite: !blocks.any,
-      // перед первым голосовым надо принять действующую редакцию согласия
-      needConsent: who.user.consent !== LEGAL_VERSION,
     },
     offers: offers.results,
     // до какого сообщения дочитал собеседник
@@ -346,7 +326,7 @@ export async function adminComplaints(env) {
   const messages = ids.length
     ? (
         await env.DB.prepare(
-          `SELECT chat_id, sender, text, photo, voice, seconds FROM (
+          `SELECT chat_id, sender, text, photo FROM (
              SELECT *, ROW_NUMBER() OVER (PARTITION BY chat_id ORDER BY id DESC) AS n FROM messages
              WHERE chat_id IN (${ids.map(() => '?').join(',')})
            ) WHERE n <= 30 ORDER BY id`
@@ -366,12 +346,12 @@ export async function adminComplaints(env) {
       banned: Boolean(r.banned),
       messages: messages
         .filter((m) => m.chat_id === r.chat_id)
-        .map((m) => ({ accused: m.sender === r.target, text: m.text, photo: m.photo, voice: m.voice, seconds: m.seconds })),
+        .map((m) => ({ accused: m.sender === r.target, text: m.text, photo: m.photo })),
     })),
   });
 }
 
-// Модератору доступны снимки и голосовые только из тех диалогов, на которые пожаловались.
+// Модератору доступны снимки только из тех диалогов, на которые пожаловались.
 export async function adminChatPhoto(env, photo) {
   const row = await env.DB.prepare(
     'SELECT mime, full AS data FROM photos WHERE id = ? AND chat_id IN (SELECT chat_id FROM complaints)'

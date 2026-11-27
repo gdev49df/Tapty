@@ -168,7 +168,7 @@ const PRICE_KEYS = { offer: 'offerText', accepted: 'answerAccept', declined: 'an
 export const priceWords = (kind, amount) => `${t(PRICE_KEYS[kind])} ${money(amount)}`;
 // Последнее сообщение в списке диалогов.
 export const lastText = (c) =>
-  PRICE_KEYS[c.lastKind] ? priceWords(c.lastKind, c.lastAmount) : c.lastVoice ? t('voiceMessage') : c.last || t('photoMessage');
+  PRICE_KEYS[c.lastKind] ? priceWords(c.lastKind, c.lastAmount) : c.last || t('photoMessage');
 
 export const cityOptions = () =>
   CITIES.map((c) => ({ value: c.id, label: c[lang()] }));

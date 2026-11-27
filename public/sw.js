@@ -1,11 +1,11 @@
 // Оффлайн: оболочка приложения, последние объявления и уже виденные фото.
-const VERSION = 'v35';
+const VERSION = 'v36';
 const SHELL = `shell-${VERSION}`;
 const DATA = `data-${VERSION}`;
 const PHOTOS = `photos-${VERSION}`;
 const FILES = [
   '/', '/css/app.css', '/manifest.webmanifest',
-  '/js/app.js', '/js/api.js', '/js/catalog.js', '/js/i18n.js', '/js/icons.js', '/js/images.js', '/js/auth.js', '/js/reviews.js', '/js/unread.js', '/js/dialogs.js', '/js/viewer.js', '/js/voice.js', '/js/store.js', '/js/favorites.js', '/js/ui.js',
+  '/js/app.js', '/js/api.js', '/js/catalog.js', '/js/i18n.js', '/js/icons.js', '/js/images.js', '/js/auth.js', '/js/reviews.js', '/js/unread.js', '/js/dialogs.js', '/js/viewer.js', '/js/store.js', '/js/favorites.js', '/js/ui.js',
   '/js/header.js', '/js/footer.js', '/js/promo.js', '/js/pages/seller.js', '/js/pages/home.js', '/js/pages/search.js', '/js/pages/item.js', '/js/pages/post.js', '/js/pages/fav.js', '/js/pages/me.js', '/js/pages/rules.js', '/js/pages/legal.js', '/js/pages/chats.js', '/js/pages/chat.js', '/js/pages/admin.js',
   '/fonts/manrope-cyrillic-wght-normal.woff2', '/fonts/manrope-cyrillic-ext-wght-normal.woff2', '/fonts/manrope-latin-wght-normal.woff2', '/fonts/manrope-latin-ext-wght-normal.woff2',
   '/icons/favicon-64.png', '/icons/logo-192.png', '/img/logo.webp', '/img/name.svg',

@@ -86,8 +86,6 @@ export const LIMITS = {
   priceMax: 100_000_000_000,
   fullBytes: 900_000,
   thumbBytes: 150_000,
-  voiceSeconds: 60,
-  voiceBytes: 1_500_000,
   days: 30,
 };
 

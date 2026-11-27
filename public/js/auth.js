@@ -222,32 +222,6 @@ export function authForm(root, { onDone, note = '', mode = 'login' }) {
   draw();
 }
 
-// Повторное согласие: аккаунт создан до того, как на сайте появились новые сведения о человеке.
-export function consentSheet(onDone) {
-  const s = sheet(
-    `<form class="form" novalidate>
-      <p>${esc(t('consentAbout'))}</p>
-      ${agreeBoxes()}
-      <p class="form-error" role="alert"></p>
-      <button class="btn wide">${esc(t('consentSend'))}</button>
-    </form>`,
-    { title: t('consentTitle') }
-  );
-  const form = $('form', s.body);
-  bindForm(
-    form,
-    () => {
-      const missed = AGREE.find((name) => !form.elements[name].checked);
-      return missed ? [missed, t('consentNeeded')] : null;
-    },
-    async () => {
-      await api('/auth/consent', { method: 'POST', body: { consent: LEGAL_VERSION } });
-      s.close();
-      onDone();
-    }
-  );
-}
-
 // Смена пароля из профиля.
 export function passwordSheet(user) {
   const s = sheet(

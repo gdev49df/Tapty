@@ -3,7 +3,7 @@ import { DAY, HttpError, fail, insecure, json, network, now, randomHex, sha256 }
 import { openAdmin, requireAdmin } from './admin.js';
 import * as listings from './listings.js';
 import { servePhoto, uploadPhoto } from './photos.js';
-import { SESSION_DAYS, acceptConsent, changePassword, deleteAccount, recover, register, replaceCode, requireUser, signIn, signOut } from './auth.js';
+import { SESSION_DAYS, changePassword, deleteAccount, recover, register, replaceCode, requireUser, signIn, signOut } from './auth.js';
 import * as chat from './chat.js';
 import * as reviews from './reviews.js';
 import * as favorites from './favorites.js';
@@ -62,7 +62,6 @@ async function api(request, env, ctx, url) {
   if (method === 'POST' && path === '/auth/password') return changePassword(request, env, who);
   if (method === 'POST' && path === '/auth/code') return replaceCode(request, env, who);
   if (method === 'POST' && path === '/auth/delete') return deleteAccount(request, env, who);
-  if (method === 'POST' && path === '/auth/consent') return acceptConsent(request, env, who);
   if (method === 'GET' && path === '/price-hint') return listings.priceHint(env, url, who);
 
   if (path === '/favorites') {
@@ -89,10 +88,9 @@ async function api(request, env, ctx, url) {
   if (method === 'POST' && (m = /^\/chats\/(\d{1,12})\/offers\/(\d{1,12})$/.exec(path))) {
     return chat.answerOffer(request, env, Number(m[1]), Number(m[2]), who);
   }
-  if ((m = /^\/chats\/(\d{1,12})\/(photo|voice|block|complaint|pin)$/.exec(path))) {
+  if ((m = /^\/chats\/(\d{1,12})\/(photo|block|complaint|pin)$/.exec(path))) {
     const id = Number(m[1]);
     if (m[2] === 'photo' && method === 'POST') return chat.sendPhoto(request, env, id, who);
-    if (m[2] === 'voice' && method === 'POST') return chat.sendVoice(request, env, id, who);
     if (m[2] === 'complaint' && method === 'POST') return chat.complain(request, env, id, who);
     if (m[2] === 'block' && (method === 'POST' || method === 'DELETE')) return chat.setBlock(env, id, method === 'POST', who);
     if (m[2] === 'pin' && (method === 'POST' || method === 'DELETE')) return chat.setPin(env, id, method === 'POST', who);

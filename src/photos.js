@@ -51,31 +51,6 @@ export async function storePhoto(request, env, owner, chatId = null) {
   return id;
 }
 
-// Тип записи определяется по самим байтам, а не по тому, что прислал браузер.
-function sniffAudio(bytes) {
-  const tag = (from) => String.fromCharCode(...bytes.subarray(from, from + 4));
-  if (bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3) return 'audio/webm';
-  if (tag(4) === 'ftyp') return 'audio/mp4';
-  if (tag(0) === 'OggS') return 'audio/ogg';
-  return null;
-}
-
-// Голосовое сообщение лежит там же, где фото из чата: те же права доступа и то же удаление.
-export async function storeVoice(env, file, owner, chatId) {
-  if (!file || typeof file === 'string') fail(400, 'bad_voice');
-  if (file.size > LIMITS.voiceBytes) fail(413, 'voice_too_large');
-  const buf = await file.arrayBuffer();
-  const mime = sniffAudio(new Uint8Array(buf, 0, Math.min(buf.byteLength, 16)));
-  if (!mime) fail(400, 'bad_voice');
-  const id = randomHex(12);
-  const inR2 = Boolean(env.PHOTOS);
-  if (inR2) await env.PHOTOS.put(`${id}/full`, buf);
-  await env.DB.prepare('INSERT INTO photos (id, owner, mime, full, thumb, created_at, chat_id) VALUES (?, ?, ?, ?, NULL, ?, ?)')
-    .bind(id, owner, mime, inR2 ? null : buf, now(), chatId)
-    .run();
-  return id;
-}
-
 // Ответ с картинкой из базы или R2; null, если файла нет.
 export async function photoResponse(env, id, variant, row, cache) {
   const column = variant === 'thumb' ? 'thumb' : 'full';

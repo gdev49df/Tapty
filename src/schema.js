@@ -78,9 +78,7 @@ const STATEMENTS = [
     photo TEXT NOT NULL DEFAULT '',
     kind TEXT NOT NULL DEFAULT '',
     amount INTEGER NOT NULL DEFAULT 0,
-    state TEXT NOT NULL DEFAULT '',
-    voice TEXT NOT NULL DEFAULT '',
-    seconds INTEGER NOT NULL DEFAULT 0
+    state TEXT NOT NULL DEFAULT ''
   )`,
   `CREATE INDEX IF NOT EXISTS messages_chat ON messages (chat_id, id)`,
   `CREATE TABLE IF NOT EXISTS reviews (
@@ -130,8 +128,6 @@ const COLUMNS = {
     kind: "TEXT NOT NULL DEFAULT ''",
     amount: 'INTEGER NOT NULL DEFAULT 0',
     state: "TEXT NOT NULL DEFAULT ''",
-    voice: "TEXT NOT NULL DEFAULT ''",
-    seconds: 'INTEGER NOT NULL DEFAULT 0',
   },
 };
 
