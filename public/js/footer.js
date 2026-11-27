@@ -13,7 +13,7 @@ function draw() {
   $('#footer').innerHTML = `
     <div class="foot">
       <div class="foot-about">
-        <a href="/" class="logo" aria-label="tapty."><span>tapty<b>.</b></span></a>
+        <a href="/" class="logo"><img src="/img/wordmark.svg" alt="tapty." width="68" height="24"></a>
         <p>${esc(t('footerAbout'))}</p>
         <a href="/new" class="btn ghost">${esc(t('postAd'))}</a>
       </div>

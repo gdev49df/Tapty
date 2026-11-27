@@ -59,8 +59,8 @@ h2 { font-size: 18px; line-height: 1.35; font-weight: 600; }
 .has-footer #view { min-height: 100dvh; padding-bottom: 48px; }
 
 /* ---------- логотип: значок с пакетом и тенге, рядом название ---------- */
-.logo { display: inline-flex; align-items: center; font-weight: 800; font-size: 24px; letter-spacing: -.045em; line-height: 1; }
-.logo b { color: var(--accent); font-weight: inherit; }
+.logo { display: inline-flex; align-items: center; }
+.logo img { width: auto; height: 24px; }
 
 /* ---------- полоса про соцсети ---------- */
 #promo { display: grid; grid-template-rows: 0fr; padding-top: var(--safe-t); transition: grid-template-rows .45s cubic-bezier(.22, 1, .36, 1), background-color .45s; }
@@ -102,7 +102,8 @@ body[data-page='item'] #tabs, body[data-page='chat'] #tabs { display: none; }
 body[data-page='home'] #topbar, body[data-page='search'] #topbar { display: block; }
 body[data-page='home'] #view, body[data-page='search'] #view { padding-top: 0; }
 .head { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-areas: 'logo' 'search'; align-items: center; gap: 12px; padding: calc(12px + var(--safe-t)) 16px 16px; border-bottom: 1px solid var(--line); }
-.head > .logo { grid-area: logo; justify-self: start; font-size: 28px; }
+.head > .logo { grid-area: logo; justify-self: start; }
+.head > .logo img { height: 28px; }
 .head .pill, .head .head-post { display: none; }
 .searchbar { grid-area: search; display: flex; align-items: center; gap: 12px; height: 52px; padding: 0 4px 0 16px; background: var(--surface); border: 1px solid transparent; border-radius: var(--r-l); color: var(--muted); }
 .searchbar:focus-within { border-color: var(--accent); }
