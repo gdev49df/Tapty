@@ -10,7 +10,7 @@ let cache = null;
 // Семь категорий на виду, остальные открываются плиткой «Другое».
 const MAIN = ['clothes', 'phones', 'electronics', 'transport', 'realty', 'kids', 'jobs'];
 // Для этих категорий картинки нет, вместо неё значок.
-const ICONS = ['home_garden', 'other'];
+const ICONS = ['other'];
 
 const art = (id) =>
   ICONS.includes(id)

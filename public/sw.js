@@ -1,5 +1,5 @@
 // Оффлайн: оболочка приложения, последние объявления и уже виденные фото.
-const VERSION = 'v23';
+const VERSION = 'v24';
 const SHELL = `shell-${VERSION}`;
 const DATA = `data-${VERSION}`;
 const PHOTOS = `photos-${VERSION}`;
@@ -9,8 +9,8 @@ const FILES = [
   '/js/header.js', '/js/footer.js', '/js/promo.js', '/js/pages/seller.js', '/js/pages/home.js', '/js/pages/search.js', '/js/pages/item.js', '/js/pages/post.js', '/js/pages/fav.js', '/js/pages/me.js', '/js/pages/rules.js', '/js/pages/chats.js', '/js/pages/chat.js', '/js/pages/admin.js',
   '/fonts/manrope-cyrillic-wght-normal.woff2', '/fonts/manrope-cyrillic-ext-wght-normal.woff2', '/fonts/manrope-latin-wght-normal.woff2', '/fonts/manrope-latin-ext-wght-normal.woff2',
   '/icons/icon.svg', '/icons/mark.svg', '/icons/icon-192.png', '/img/mark3d.webp',
-  ...['clothes', 'phones', 'electronics', 'transport', 'realty', 'kids', 'beauty', 'hobby', 'repair', 'animals', 'services', 'jobs'].map((id) => `/img/cat/${id}.webp`),
-  '/img/cat/home_garden.svg', '/img/cat/other.svg',
+  ...['clothes', 'phones', 'electronics', 'transport', 'realty', 'kids', 'home_garden', 'beauty', 'hobby', 'repair', 'animals', 'services', 'jobs'].map((id) => `/img/cat/${id}.webp`),
+  '/img/cat/other.svg',
 ];
 
 self.addEventListener('install', (e) => {

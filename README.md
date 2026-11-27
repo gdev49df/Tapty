@@ -116,7 +116,7 @@
 
 На главной видны семь категорий и плитка «Другое», из неё открываются остальные. Набор задаётся списком `MAIN` в `public/js/pages/home.js`.
 
-Картинки плиток лежат в `public/img/cat/*.webp` (300×300, прозрачные углы). Для «Дом и сад» и «Другое» картинок пока нет, там значки [Phosphor Icons](https://github.com/phosphor-icons/core) (duotone, лицензия MIT: `public/img/cat/LICENSE.txt`). Чтобы заменить значок картинкой, положите `<id>.webp`, уберите id из `ICONS` в том же файле и поправьте список в `public/sw.js`.
+Картинки плиток лежат в `public/img/cat/*.webp` (300×300, прозрачные углы). Для «Другое» картинки пока нет, там значок [Phosphor Icons](https://github.com/phosphor-icons/core) (duotone, лицензия MIT: `public/img/cat/LICENSE.txt`). Чтобы заменить значок картинкой, положите `<id>.webp`, уберите id из `ICONS` в том же файле и поправьте список в `public/sw.js`.
 
 ## Локально
 
