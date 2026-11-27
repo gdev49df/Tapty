@@ -76,6 +76,12 @@ h2 { font-size: 18px; line-height: 1.35; font-weight: 600; }
 #promo button { display: grid; place-items: center; flex: none; width: 40px; height: 40px; margin-right: -8px; border-radius: var(--r); color: var(--muted); }
 #promo button:hover { background: var(--surface-2); color: var(--text); }
 .has-promo #topbar, .has-promo #view { --safe-t: 0px; }
+/* где место есть, значок с текстом стоят по центру, а крестик не сдвигает их вбок */
+@media (min-width: 640px) {
+  .promo-row { position: relative; padding-inline: 64px; }
+  #promo p { flex: 0 1 auto; }
+  #promo button { position: absolute; top: 50%; right: 16px; margin: -20px 0 0; }
+}
 
 /* включение входа по коду в модерации */
 .setup .my { display: flex; flex-direction: column; gap: 12px; }
@@ -557,7 +563,6 @@ body[data-page='item'] #toast { bottom: calc(var(--safe-b) + 96px); }
   .chat { min-height: calc(100dvh - 85px); }
   .promo-row { min-height: 96px; gap: 24px; }
   #promo img { width: 64px; height: 64px; }
-  #promo p { flex: 0 1 auto; margin-right: auto; }
   .chat-top { top: 85px; }
   .item-seller { margin: 0; }
   .gallery-wrap { background: none; }
