@@ -1,8 +1,7 @@
 // Общий справочник: используется и сайтом, и воркером.
 export const CATEGORIES = [
   { id: 'clothes', ru: 'Одежда и обувь', kk: 'Киім мен аяқ киім', goods: true },
-  { id: 'phones', ru: 'Телефоны', kk: 'Телефондар', goods: true },
-  { id: 'electronics', ru: 'Электроника', kk: 'Электроника', goods: true },
+  { id: 'electronics', ru: 'Телефоны и электроника', kk: 'Телефондар мен электроника', goods: true },
   { id: 'transport', ru: 'Транспорт и запчасти', kk: 'Көлік және бөлшектер', goods: true },
   { id: 'realty', ru: 'Недвижимость', kk: 'Жылжымайтын мүлік', goods: false },
   { id: 'kids', ru: 'Детский мир', kk: 'Балалар әлемі', goods: true },
@@ -15,6 +14,10 @@ export const CATEGORIES = [
   { id: 'jobs', ru: 'Работа', kk: 'Жұмыс', goods: false },
   { id: 'other', ru: 'Другое', kk: 'Басқа', goods: true },
 ];
+
+// Объединённые категории: старый id ещё приходит из сохранённых ссылок и не обновившегося приложения.
+const MERGED = { phones: 'electronics' };
+export const categoryId = (id) => (Object.hasOwn(MERGED, id) ? MERGED[id] : id);
 
 export const CITIES = [
   { id: 'astana', ru: 'Астана', kk: 'Астана' },

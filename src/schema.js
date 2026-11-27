@@ -132,6 +132,10 @@ async function migrate(env) {
     }
   }
   await env.DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS users_login ON users (login)').run();
+  // «Телефоны» влились в «Телефоны и электроника»; перебор статусов даёт запросу пройти по индексу
+  await env.DB.prepare(
+    "UPDATE listings SET category = 'electronics' WHERE status IN ('active', 'sold', 'hidden') AND category = 'phones'"
+  ).run();
 }
 
 let ready = null;

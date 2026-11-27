@@ -393,8 +393,26 @@ try {
     ]) assert.ok(!same(a, b), `${a} != ${b}`);
   });
 
+  await test('«Телефоны» объединены с электроникой, старый id принимается', async () => {
+    const token = await signUp('Нурлан');
+    const old = await create(token, { title: 'Телефон кнопочный Nokia', category: 'phones', city: 'oral', phone: '77040000009' });
+    assert.equal((await read(old)).item.category, 'electronics');
+    const found = async (cat) => (await call(`/api/listings?city=oral&cat=${cat}`)).data.items.map((x) => x.id);
+    assert.deepEqual(await found('electronics'), [old]);
+    assert.deepEqual(await found('phones'), [old]);
+    assert.equal((await call('/api/listings', { token, method: 'POST', body: listing({ category: 'constructor' }) })).status, 400);
+    // объявление, сохранённое прежней версией, переезжает при запуске новой
+    await stop();
+    runSql(`UPDATE listings SET category = 'phones' WHERE id = ${old}`);
+    await start({ ADMIN_KEY: 'секрет-админа' });
+    assert.deepEqual(await found('electronics'), [old]);
+    assert.equal((await read(old)).item.category, 'electronics');
+    // дальше проверки считают электронику с нуля
+    assert.equal((await call(`/api/listings/${old}`, { token, method: 'DELETE' })).status, 200);
+  });
+
   await test('такие же товары по другой цене', async () => {
-    const phone = (token, title, price, n) => create(token, { title, price, category: 'phones', phone: `7704000000${n}` });
+    const phone = (token, title, price, n) => create(token, { title, price, category: 'kids', phone: `7704000000${n}` });
     const [a, b, c] = [await signUp('Анна'), await signUp('Боря'), await signUp('Вера')];
     const mine = await phone(a, 'iPhone 13, 128 ГБ', 200000, 1);
     await phone(a, 'iPhone 13 второй', 150000, 1);

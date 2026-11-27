@@ -8,14 +8,16 @@ import { $, $$, closeSheet, emptyState, esc, feed, sheet } from '../ui.js';
 let cache = null;
 
 // Семь категорий на виду, остальные открываются плиткой «Другое».
-const MAIN = ['clothes', 'phones', 'electronics', 'transport', 'realty', 'kids', 'jobs'];
+const MAIN = ['clothes', 'electronics', 'transport', 'realty', 'kids', 'home_garden', 'jobs'];
 // Для этих категорий картинки нет, вместо неё значок.
 const ICONS = ['other'];
+// Имя файла картинки, если оно не совпадает с id категории.
+const PICTURES = { electronics: 'gadgets' };
 
 const art = (id) =>
   ICONS.includes(id)
     ? `<span><img class="cat-icon" src="/img/cat/${id}.svg" alt="" width="44" height="44" decoding="async"></span>`
-    : `<span><img src="/img/cat/${id}.webp" alt="" width="300" height="300" decoding="async"></span>`;
+    : `<span><img src="/img/cat/${PICTURES[id] || id}.webp" alt="" width="300" height="300" decoding="async"></span>`;
 
 const tile = (c, selected) =>
   `<button class="cat" data-cat="${c.id}" aria-pressed="${c.id === selected}">${art(c.id)}${esc(label(c))}</button>`;

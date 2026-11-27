@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { CATEGORIES, CONDITIONS, PRICE_TYPES } from '../catalog.js';
+import { CATEGORIES, CONDITIONS, PRICE_TYPES, categoryId } from '../catalog.js';
 import { icon } from '../icons.js';
 import { label, t } from '../i18n.js';
 import { store } from '../store.js';
@@ -11,6 +11,7 @@ let cache = null; // результаты для возврата «назад»
 
 export default function search({ root, query, alive, onLeave, go, restored }) {
   const filters = Object.fromEntries(KEYS.map((k) => [k, query.get(k) || '']));
+  filters.cat = categoryId(filters.cat);
   if (!query.has('city')) filters.city = store.get('city', '');
   if (!areaOptions(filters.city).some((a) => a.value === filters.area)) filters.area = '';
   const sorts = [

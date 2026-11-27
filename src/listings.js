@@ -1,5 +1,5 @@
 import {
-  AREAS, CATEGORIES, CITIES, CONDITIONS, LIMITS, PRICE_TYPES, REPORT_REASONS, normalizePhone,
+  AREAS, CATEGORIES, CITIES, CONDITIONS, LIMITS, PRICE_TYPES, REPORT_REASONS, categoryId, normalizePhone,
 } from '../public/js/catalog.js';
 import { DAY, fail, json, limit, hit, normalizeText, now, readJson } from './util.js';
 import { deleteOrphans, deletePhotos } from './photos.js';
@@ -77,7 +77,8 @@ export async function listListings(env, url) {
     where.push(sql);
     args.push(value);
   };
-  if (CATEGORIES.some((c) => c.id === p.get('cat'))) add('category = ?', p.get('cat'));
+  const cat = categoryId(p.get('cat'));
+  if (CATEGORIES.some((c) => c.id === cat)) add('category = ?', cat);
   if (CITIES.some((c) => c.id === p.get('city'))) add('city = ?', p.get('city'));
   if (Object.values(AREAS).flat().some((a) => a.id === p.get('area'))) add('area = ?', p.get('area'));
   if (CONDITIONS.includes(p.get('cond'))) add('condition = ?', p.get('cond'));
@@ -153,7 +154,7 @@ const median = (sorted) => (sorted[(sorted.length - 1) >> 1] + sorted[sorted.len
 export async function priceHint(env, url, { owner }) {
   const p = url.searchParams;
   const none = () => json({ count: 0 });
-  const category = p.get('cat');
+  const category = categoryId(p.get('cat'));
   if (!CATEGORIES.some((c) => c.id === category)) return none();
   const sig = signature(String(p.get('title') || '').slice(0, LIMITS.titleMax));
   const find = needles(sig);
@@ -279,6 +280,7 @@ function validate(body) {
   const oneOf = (key, list) => (list.includes(body[key]) ? body[key] : fail(400, 'invalid', key));
 
   const title = str('title', LIMITS.titleMax, LIMITS.titleMin).replace(/\s+/g, ' ');
+  body.category = categoryId(body.category);
   const category = oneOf('category', CATEGORIES.map((c) => c.id));
   const priceType = oneOf('priceType', PRICE_TYPES);
   let price = Math.floor(Number(body.price || 0));
