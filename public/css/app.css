@@ -93,6 +93,8 @@ h2 { font-size: 18px; line-height: 1.35; font-weight: 600; }
 [data-unread] { position: absolute; top: -2px; right: 4px; display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 600; line-height: 1; box-shadow: 0 0 0 2px var(--bg); }
 .tab[aria-current] { color: var(--text); }
 .tab[aria-current] .i { stroke: var(--accent-ink); }
+/* открыто «Избранное» — сердце залито */
+.tab-fav[aria-current] .i, .pill [data-tab='fav'][aria-current] .i { fill: var(--accent); stroke: var(--accent); }
 .tab-new span { background: var(--accent); color: #fff; border-radius: var(--r-s); }
 .tab-new[aria-current] .i { stroke: #fff; }
 body[data-page='item'] #tabs, body[data-page='chat'] #tabs { display: none; }
