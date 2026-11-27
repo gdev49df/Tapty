@@ -579,6 +579,13 @@ body[data-page='item'] #toast { bottom: calc(var(--safe-b) + 96px); }
   #toast, body[data-page='item'] #toast { bottom: 32px; }
 }
 
+/* на телефоне ряд листается пальцем: край четвёртой плитки подсказывает, что дальше есть ещё */
+@media (max-width: 699px) {
+  #view > .cats { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: calc((100% - 3 * 12px) / 3.4); gap: 12px; margin-inline: -16px; padding-inline: 16px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; scroll-padding-inline: 16px; scrollbar-width: none; }
+  #view > .cats::-webkit-scrollbar { display: none; }
+  #view > .cats > .cat { scroll-snap-align: start; }
+  #view > .cats .cat { font-size: 12px; }
+}
 /* с этой ширины все восемь плиток встают в один ряд */
 @media (min-width: 700px) { #view > .cats { grid-template-columns: repeat(8, minmax(0, 1fr)); } }
 

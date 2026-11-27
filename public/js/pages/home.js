@@ -76,6 +76,8 @@ export default function home({ root, alive, onLeave, restored }) {
     $('[data-more]', cats).setAttribute('aria-current', hidden(value));
     start();
   };
+  // после возврата на главную выбранная плитка снова на виду
+  $('[aria-pressed="true"], [aria-current="true"]', cats)?.scrollIntoView({ block: 'nearest', inline: 'center' });
   cats.addEventListener('click', (e) => {
     const btn = e.target.closest('.cat');
     if (!btn) return;
