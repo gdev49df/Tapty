@@ -5,6 +5,7 @@ import { CHAT_REASONS } from '../catalog.js';
 import { compress } from '../images.js';
 import { icon } from '../icons.js';
 import { t } from '../i18n.js';
+import { askDeleteChat } from '../dialogs.js';
 import { reviewForm } from '../reviews.js';
 import { refreshUnread } from '../unread.js';
 import { openViewer } from '../viewer.js';
@@ -13,7 +14,7 @@ import { $, $$, dateText, emptyState, errorText, esc, priceText, sheet, timeText
 const EVERY = 4000;
 const AT_ONCE = 4; // столько фото можно отправить за один раз
 
-export default async function chatPage({ root, params, alive, back, rerender, onLeave }) {
+export default async function chatPage({ root, params, alive, back, go, rerender, onLeave }) {
   const id = Number(params[0]);
   const head = (title) =>
     `<div class="page-head"><button class="icon-btn" data-back aria-label="${esc(t('back'))}">${icon('back')}</button><h1>${esc(title)}</h1></div>`;
@@ -155,6 +156,17 @@ export default async function chatPage({ root, params, alive, back, rerender, on
     };
   }
 
+  async function pin(on) {
+    try {
+      await api(`/chats/${id}/pin`, { method: on ? 'POST' : 'DELETE' });
+      if (!alive()) return;
+      chat.pinned = on;
+      toast(t(on ? 'pinnedDone' : 'unpinnedDone'));
+    } catch (e) {
+      if (alive()) toast(errorText(e));
+    }
+  }
+
   function askComplaint() {
     const s = sheet(
       `<form class="form">
@@ -190,17 +202,29 @@ export default async function chatPage({ root, params, alive, back, rerender, on
   }
 
   $('[data-more]', root).onclick = () => {
-    const row = (name, ic, text) => `<li><button data-act="${name}">${icon(ic)}<span>${esc(text)}</span></button></li>`;
+    const row = (name, ic, text, red = false) =>
+      `<li><button data-act="${name}"${red ? ' class="danger"' : ''}>${icon(ic)}<span>${esc(text)}</span></button></li>`;
     const s = sheet(
-      `<ul class="menu">${row('complain', 'flag', t('complain'))}${row(
-        chat.blockedByMe ? 'unblock' : 'block', 'ban', t(chat.blockedByMe ? 'unblock' : 'block')
-      )}</ul>`,
+      `<ul class="menu">${[
+        row(chat.pinned ? 'unpin' : 'pin', 'pushpin', t(chat.pinned ? 'unpinChat' : 'pinChat')),
+        row('delete', 'trash', t('deleteChat')),
+        row('complain', 'flag', t('complain'), true),
+        chat.blockedByMe ? row('unblock', 'ban', t('unblock')) : row('block', 'ban', t('block'), true),
+      ].join('')}</ul>`,
       { title: chat.other }
     );
+    const actions = {
+      pin: () => pin(true),
+      unpin: () => pin(false),
+      delete: () => askDeleteChat(id, chat.other, () => alive() && go('/chats', { replace: true })),
+      complain: askComplaint,
+      block: askBlock,
+      unblock: () => block(false),
+    };
     $$('[data-act]', s.body).forEach((b) => {
       b.onclick = () => {
         s.close();
-        ({ complain: askComplaint, block: askBlock, unblock: () => block(false) })[b.dataset.act]();
+        actions[b.dataset.act]();
       };
     });
   };

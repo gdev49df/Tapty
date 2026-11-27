@@ -3,6 +3,7 @@ import { api, auth } from '../api.js';
 import { authForm } from '../auth.js';
 import { icon } from '../icons.js';
 import { t } from '../i18n.js';
+import { askDeleteChat } from '../dialogs.js';
 import { $, dateText, emptyState, errorText, esc, timeText } from '../ui.js';
 
 export default async function chats({ root, alive, rerender, onLeave }) {
@@ -18,13 +19,19 @@ export default async function chats({ root, alive, rerender, onLeave }) {
 
   let timer;
   let drawn = '';
+  let latest = 0; // ответ на устаревший запрос не должен вернуть удалённый диалог
   onLeave(() => clearTimeout(timer));
+  box.addEventListener('click', (e) => {
+    const cross = e.target.closest('[data-remove]');
+    if (cross) askDeleteChat(cross.dataset.remove, cross.dataset.name, () => alive() && load());
+  });
 
   async function load() {
     clearTimeout(timer);
+    const request = ++latest;
     try {
       const { items } = await api('/chats');
-      if (!alive()) return;
+      if (!alive() || request !== latest) return;
       const when = (at) => (dateText(at) === t('today') ? timeText(at) : dateText(at));
       const html = items.length
         ? `<ul class="dialogs">${items
@@ -32,19 +39,22 @@ export default async function chats({ root, alive, rerender, onLeave }) {
               (c) => `<li><a href="/chat/${c.id}"${c.unread ? ' class="new"' : ''}>
                 <span class="my-photo">${c.photo ? `<img src="/p/${c.photo}/t" alt="" loading="lazy">` : icon('camera')}</span>
                 <span class="dialog-text">
-                  <span><strong>${esc(c.other)}</strong><small>${esc(when(c.at))}</small></span>
+                  <span><strong>${esc(c.other)}</strong><small>${
+                    c.pinned ? `<span class="pinned" role="img" aria-label="${esc(t('pinnedTag'))}">${icon('pushpin')}</span>` : ''
+                  }${esc(when(c.at))}</small></span>
                   <small>${c.blocked ? `${esc(t('blockedTag'))}. ` : ''}${esc(c.title)}</small>
                   <span><span class="dialog-last">${c.lastMine ? `${esc(t('you'))}: ` : ''}${esc(c.last || t('photoMessage'))}</span>${
                     c.unread ? `<b>${c.unread}</b>` : ''
                   }</span>
-                </span></a></li>`
+                </span></a>
+                <button type="button" class="dialog-remove" data-remove="${c.id}" data-name="${esc(c.other)}" aria-label="${esc(t('deleteChat'))}">${icon('close')}</button></li>`
             )
             .join('')}</ul>`
         : emptyState(t('noChats'), t('noChatsHint'), `<a class="btn" href="/">${esc(t('toHome'))}</a>`);
       // Перерисовываем только при изменениях, чтобы не сбивать фокус.
       if (html !== drawn) box.innerHTML = drawn = html;
     } catch (e) {
-      if (!alive()) return;
+      if (!alive() || request !== latest) return;
       if (e.code === 'login_required') return login();
       if (!drawn) {
         box.innerHTML = `<div class="empty"><p>${esc(errorText(e))}</p><button class="btn ghost">${esc(t('retry'))}</button></div>`;

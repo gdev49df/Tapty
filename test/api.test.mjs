@@ -616,6 +616,44 @@ try {
     assert.equal((await text(anna)).status, 201);
   });
 
+  await test('закрепить и удалить чат можно только у себя', async () => {
+    const act = (token, path, method) => call(`/api/chats/${path}`, { token, method });
+    const ids = async (token) => (await call('/api/chats', { token })).data.items.map((c) => c.id);
+    const open = async (token) => (await call(`/api/chats/${talk}`, { token })).data;
+    const kettle = await create(anna, { title: 'Чайник электрический', phone: '77060000001', price: 7000, category: 'electronics' });
+    const newer = (await post(`/api/listings/${kettle}/chat`, boris, { text: 'Свободен?' })).data.chat;
+    const stranger = await enter('Чужой');
+    for (const [path, method] of [[`${talk}/pin`, 'POST'], [`${talk}/pin`, 'DELETE'], [`${talk}`, 'DELETE']]) {
+      assert.equal((await act(stranger, path, method)).status, 404);
+      assert.equal((await act(key(), path, method)).status, 401);
+    }
+
+    assert.equal((await ids(boris))[0], newer);
+    assert.equal((await act(boris, `${talk}/pin`, 'POST')).status, 200);
+    assert.deepEqual([(await ids(boris))[0], (await open(boris)).chat.pinned], [talk, true]);
+    assert.deepEqual([(await ids(anna))[0], (await open(anna)).chat.pinned], [newer, false]);
+    await act(boris, `${talk}/pin`, 'DELETE');
+    assert.equal((await ids(boris))[0], newer);
+
+    await act(boris, `${talk}/pin`, 'POST');
+    await post(`/api/chats/${talk}`, anna, { text: 'Непрочитанное' });
+    const before = (await call('/api/chats/unread', { token: boris })).data.count;
+    const history = (await open(anna)).messages.length;
+    assert.equal((await act(boris, `${talk}`, 'DELETE')).status, 200);
+    assert.ok(!(await ids(boris)).includes(talk));
+    assert.ok((await call('/api/chats/unread', { token: boris })).data.count < before);
+    assert.deepEqual([(await open(boris)).messages, (await open(boris)).chat.pinned], [[], false]);
+    // у собеседника всё на месте
+    assert.ok((await ids(anna)).includes(talk));
+    assert.equal((await open(anna)).messages.length, history);
+    // новое сообщение возвращает диалог, но без удалённого
+    await post(`/api/chats/${talk}`, anna, { text: 'Вы тут?' });
+    assert.ok((await ids(boris)).includes(talk));
+    assert.deepEqual((await open(boris)).messages.map((m) => m.text), ['Вы тут?']);
+    const card = (await call('/api/chats', { token: boris })).data.items.find((c) => c.id === talk);
+    assert.deepEqual([card.unread, card.pinned], [0, false]);
+  });
+
   await test('жалоба из чата и решение модератора', async () => {
     const complain = (token, body) => post(`/api/chats/${talk}/complaint`, token, body);
     assert.equal((await complain(boris, { reason: 'bored' })).status, 400);

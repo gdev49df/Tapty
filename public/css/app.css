@@ -355,6 +355,17 @@ body[data-page='item'] #view { padding: 0 0 32px; }
 .dialog-text > span > small { flex: none; }
 .dialog-last { color: var(--text-2); }
 .dialogs .new .dialog-last { color: var(--text); font-weight: 600; }
+.dialog-text .pinned { display: inline-block; margin-right: 4px; vertical-align: -2px; }
+.dialog-text .pinned .i { display: block; width: 14px; height: 14px; }
+.dialogs li { position: relative; }
+.dialog-remove { display: none; }
+/* крестик нужен только там, где есть наведение: на телефоне чат удаляется из его меню */
+@media (hover: hover) {
+  .dialogs a { padding-right: 52px; }
+  .dialog-remove { position: absolute; top: 50%; right: 0; display: grid; place-items: center; width: 40px; height: 40px; margin-top: -20px; border-radius: var(--r); color: var(--muted); opacity: 0; transition: opacity .15s var(--ease); }
+  .dialogs li:hover .dialog-remove, .dialog-remove:focus-visible { opacity: 1; }
+  .dialog-remove:hover { background: var(--surface); color: var(--danger); }
+}
 .dialog-text b { flex: none; display: grid; place-items: center; min-width: 20px; height: 20px; padding: 0 4px; border-radius: 10px; background: var(--accent); color: #fff; font-size: 11px; }
 body[data-page='chat'] #view { padding-bottom: 0; }
 .chat { display: flex; flex-direction: column; max-width: 720px; min-height: calc(100dvh - var(--safe-t)); margin: 0 auto; }
@@ -448,6 +459,9 @@ body[data-page='chat'] #view { padding-bottom: 0; }
 .menu small { color: var(--muted); font-size: 12px; }
 .menu .i { color: var(--muted); }
 .menu .i:last-child { width: 16px; height: 16px; }
+.menu button.danger, .menu button.danger .i { color: var(--danger); }
+.sheet-actions { display: flex; gap: 12px; }
+.sheet-actions .btn { flex: 1; }
 .credit { margin-top: 32px; text-align: center; color: var(--muted); font-size: 12px; }
 .prose section { margin-bottom: 24px; }
 .prose h2 { margin-bottom: 8px; }

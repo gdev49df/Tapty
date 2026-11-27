@@ -69,13 +69,15 @@ async function api(request, env, ctx, url) {
     } else {
       if (method === 'GET') return chat.getChat(env, url, id, who);
       if (method === 'POST') return chat.sendMessage(request, env, id, who);
+      if (method === 'DELETE') return chat.deleteChat(env, id, who);
     }
   }
-  if ((m = /^\/chats\/(\d{1,12})\/(photo|block|complaint)$/.exec(path))) {
+  if ((m = /^\/chats\/(\d{1,12})\/(photo|block|complaint|pin)$/.exec(path))) {
     const id = Number(m[1]);
     if (m[2] === 'photo' && method === 'POST') return chat.sendPhoto(request, env, id, who);
     if (m[2] === 'complaint' && method === 'POST') return chat.complain(request, env, id, who);
     if (m[2] === 'block' && (method === 'POST' || method === 'DELETE')) return chat.setBlock(env, id, method === 'POST', who);
+    if (m[2] === 'pin' && (method === 'POST' || method === 'DELETE')) return chat.setPin(env, id, method === 'POST', who);
   }
   if (method === 'GET' && (m = /^\/chats\/(\d{1,12})\/photos\/([a-f0-9]{24})(\/t)?$/.exec(path))) {
     return chat.chatPhoto(env, Number(m[1]), m[2], m[3] ? 'thumb' : 'full', who);

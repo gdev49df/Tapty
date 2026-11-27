@@ -106,6 +106,13 @@ const COLUMNS = {
   listings: { old_price: 'INTEGER NOT NULL DEFAULT 0', area: "TEXT NOT NULL DEFAULT ''" },
   users: { login: 'TEXT', pass_hash: 'TEXT', pass_salt: 'TEXT', rec_hash: 'TEXT', rec_salt: 'TEXT' },
   photos: { chat_id: 'INTEGER' },
+  // у каждого участника свои «закрепить» и «удалить»: *_cleared — номер последнего удалённого у него сообщения
+  chats: {
+    buyer_pinned: 'INTEGER NOT NULL DEFAULT 0',
+    seller_pinned: 'INTEGER NOT NULL DEFAULT 0',
+    buyer_cleared: 'INTEGER NOT NULL DEFAULT 0',
+    seller_cleared: 'INTEGER NOT NULL DEFAULT 0',
+  },
   messages: { photo: "TEXT NOT NULL DEFAULT ''" },
 };
 

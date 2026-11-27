@@ -133,7 +133,35 @@ export async function complain(request, env, id, who) {
   return json({ ok: true }, 201);
 }
 
-const UNREAD = `m.sender != ?1 AND m.id > CASE WHEN c.buyer = ?1 THEN c.buyer_read ELSE c.seller_read END`;
+// Значение того участника диалога, который сделал запрос (?1).
+const MINE = (field) => `(CASE WHEN c.buyer = ?1 THEN c.buyer_${field} ELSE c.seller_${field} END)`;
+// Удалённое пользователем не показывается ему и не считается непрочитанным.
+const UNREAD = `m.sender != ?1 AND m.id > ${MINE('read')} AND m.id > ${MINE('cleared')}`;
+const side = (chat, me) => (chat.buyer === me ? 'buyer' : 'seller');
+
+export async function setPin(env, id, on, who) {
+  if (!who.user) fail(401, 'login_required');
+  const chat = await findChat(env, id, who.owner);
+  await env.DB.prepare(`UPDATE chats SET ${side(chat, who.owner)}_pinned = ? WHERE id = ?`)
+    .bind(on ? now() : 0, id)
+    .run();
+  return json({ ok: true });
+}
+
+// Диалог удаляется только у того, кто просит: собеседник и модератор видят переписку по-прежнему.
+// Новое сообщение вернёт диалог в список, но уже без старых.
+export async function deleteChat(env, id, who) {
+  if (!who.user) fail(401, 'login_required');
+  const chat = await findChat(env, id, who.owner);
+  const mine = side(chat, who.owner);
+  await env.DB.prepare(
+    `UPDATE chats SET ${mine}_pinned = 0,
+       ${mine}_cleared = COALESCE((SELECT MAX(id) FROM messages WHERE chat_id = ?1), 0) WHERE id = ?1`
+  )
+    .bind(id)
+    .run();
+  return json({ ok: true });
+}
 
 export async function unread(env, who) {
   if (!who.user) return json({ count: 0 });
@@ -161,12 +189,14 @@ export async function listChats(env, who) {
        (SELECT text FROM messages WHERE chat_id = c.id ORDER BY id DESC LIMIT 1) AS last,
        (SELECT sender FROM messages WHERE chat_id = c.id ORDER BY id DESC LIMIT 1) AS last_sender,
        EXISTS (SELECT 1 FROM blocks WHERE blocker = ?1 AND blocked = u.id) AS blocked,
-       (SELECT COUNT(*) FROM messages m WHERE m.chat_id = c.id AND ${UNREAD}) AS unread
+       (SELECT COUNT(*) FROM messages m WHERE m.chat_id = c.id AND ${UNREAD}) AS unread,
+       ${MINE('pinned')} AS pinned
      FROM chats c
      JOIN users u ON u.id = CASE WHEN c.buyer = ?1 THEN c.seller ELSE c.buyer END
      LEFT JOIN listings l ON l.id = c.listing_id
-     WHERE c.buyer = ?1 OR c.seller = ?1
-     ORDER BY c.updated_at DESC, c.id DESC LIMIT 100`
+     WHERE (c.buyer = ?1 OR c.seller = ?1)
+       AND EXISTS (SELECT 1 FROM messages WHERE chat_id = c.id AND id > ${MINE('cleared')})
+     ORDER BY pinned > 0 DESC, c.updated_at DESC, c.id DESC LIMIT 100`
   )
     .bind(who.owner)
     .all();
@@ -180,6 +210,7 @@ export async function listChats(env, who) {
       lastMine: r.last_sender === who.owner,
       unread: r.unread,
       blocked: Boolean(r.blocked),
+      pinned: Boolean(r.pinned),
       at: r.updated_at,
     })),
   });
@@ -190,9 +221,10 @@ export async function getChat(env, url, id, who) {
   const chat = await findChat(env, id, who.owner);
   const after = Math.max(parseInt(url.searchParams.get('after'), 10) || 0, 0);
   const buying = chat.buyer === who.owner;
+  const mine = side(chat, who.owner);
   const [{ results }, other, listing] = await Promise.all([
     env.DB.prepare('SELECT id, sender, text, photo, created_at FROM messages WHERE chat_id = ? AND id > ? ORDER BY id DESC LIMIT 200')
-      .bind(id, after)
+      .bind(id, Math.max(after, chat[`${mine}_cleared`]))
       .all(),
     env.DB.prepare('SELECT name FROM users WHERE id = ?').bind(buying ? chat.seller : chat.buyer).first(),
     env.DB.prepare('SELECT title, photos, price, price_type, status, expires_at FROM listings WHERE id = ?').bind(chat.listing_id).first(),
@@ -223,6 +255,7 @@ export async function getChat(env, url, id, who) {
       canReview: canWriteReview,
       review,
       blockedByMe: blocks.byMe,
+      pinned: Boolean(chat[`${mine}_pinned`]),
       canWrite: !blocks.any,
     },
     // до какого сообщения дочитал собеседник
