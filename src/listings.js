@@ -104,7 +104,7 @@ export async function listListings(env, url) {
 
 const LIVE = "status = 'active' AND expires_at > ?";
 
-// Сколько у продавца активных объявлений и с какого момента он на Tapty.
+// Сколько у продавца активных объявлений и с какого момента он на tapty.
 async function sellerInfo(env, owner) {
   const row = await env.DB.prepare(
     `SELECT MIN(created_at) AS since, SUM(${LIVE}) AS count FROM listings WHERE owner = ?`

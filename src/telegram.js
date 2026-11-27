@@ -110,7 +110,7 @@ async function onMessage(env, origin, message) {
   if (login) {
     await api(env, 'sendMessage', {
       chat_id,
-      text: `Вход на сайт Tapty. Код: ${login.code}\n\nПодтвердите, только если вы сами начали вход и видите этот же код на экране.`,
+      text: `Вход на сайт tapty. Код: ${login.code}\n\nПодтвердите, только если вы сами начали вход и видите этот же код на экране.`,
       reply_markup: {
         inline_keyboard: [[
           { text: 'Подтвердить вход', callback_data: `ok:${nonce}` },
@@ -122,8 +122,8 @@ async function onMessage(env, origin, message) {
   }
   await api(env, 'sendMessage', {
     chat_id,
-    text: nonce ? 'Ссылка для входа устарела. Начните вход на сайте заново.' : 'Tapty — объявления по всему Казахстану.',
-    reply_markup: { inline_keyboard: [[{ text: 'Открыть Tapty', url: origin }]] },
+    text: nonce ? 'Ссылка для входа устарела. Начните вход на сайте заново.' : 'tapty. — объявления по всему Казахстану.',
+    reply_markup: { inline_keyboard: [[{ text: 'Открыть tapty.', url: origin }]] },
   });
 }
 
@@ -149,7 +149,7 @@ async function onButton(env, query) {
       )
         .bind(id, name, from.username || '', now())
         .run();
-      text = 'Готово. Вернитесь на сайт Tapty.';
+      text = 'Готово. Вернитесь на сайт tapty.';
     }
   }
   await api(env, 'answerCallbackQuery', { callback_query_id: query.id });

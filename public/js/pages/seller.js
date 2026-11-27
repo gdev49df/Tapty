@@ -25,7 +25,7 @@ export default async function seller({ root, params, alive, back }) {
   }
   if (!alive()) return;
   const { name, since, count } = data.seller;
-  document.title = `${name} — Tapty`;
+  document.title = `${name} — tapty.`;
   box.innerHTML = `
     <section class="seller-card">
       <span class="avatar" aria-hidden="true">${initial(name)}</span>

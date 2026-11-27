@@ -76,7 +76,7 @@ async function render({ restored = false } = {}) {
   const isItem = page === item;
 
   document.documentElement.lang = lang();
-  document.title = 'Tapty — объявления по Казахстану';
+  document.title = 'tapty. — объявления по Казахстану';
   document.body.dataset.page = isItem ? 'item' : path === '/' ? 'home' : path === '/search' ? 'search' : '';
   chrome(tab);
   // В форме, профиле и модерации подвал только мешает.

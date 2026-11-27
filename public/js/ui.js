@@ -39,7 +39,7 @@ const KK_FROM = ['қаңтардан', 'ақпаннан', 'наурыздан',
 export function sinceText(seconds) {
   const date = new Date(seconds * 1000);
   const [m, y] = [date.getMonth(), date.getFullYear()];
-  return lang() === 'kk' ? `Tapty-де ${y} жылғы ${KK_FROM[m]}` : `На Tapty с ${MONTHS.ru[m]} ${y}`;
+  return lang() === 'kk' ? `tapty-де ${y} жылғы ${KK_FROM[m]}` : `На tapty с ${MONTHS.ru[m]} ${y}`;
 }
 
 export const initial = (name) => esc([...String(name)][0]?.toUpperCase() || '?');
@@ -77,7 +77,7 @@ export function sheet(html, { title = '', onClose } = {}) {
   const wrap = document.createElement('div');
   wrap.className = 'sheet-wrap';
   wrap.innerHTML = `
-    <div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title || 'Tapty')}">
+    <div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title || 'tapty.')}">
       <div class="sheet-head">
         <h2>${esc(title)}</h2>
         <button class="icon-btn" data-close aria-label="${esc(t('close'))}">${icon('close')}</button>
@@ -165,7 +165,7 @@ export const skeleton = (n = 10) =>
   Array.from({ length: n }, () => '<div class="card skel" aria-hidden="true"><span class="card-photo"></span><span></span><span></span></div>').join('');
 
 export function emptyState(title, hint, action = '') {
-  return `<div class="empty"><div class="empty-tag" aria-hidden="true"></div><h2>${esc(title)}</h2><p>${esc(hint)}</p>${action}</div>`;
+  return `<div class="empty"><div class="empty-ghost" aria-hidden="true"></div><h2>${esc(title)}</h2><p>${esc(hint)}</p>${action}</div>`;
 }
 
 // Бесконечная лента: догружает следующую порцию, когда низ списка близко.

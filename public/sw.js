@@ -1,5 +1,5 @@
 // Оффлайн: оболочка приложения, последние объявления и уже виденные фото.
-const VERSION = 'v4';
+const VERSION = 'v5';
 const SHELL = `shell-${VERSION}`;
 const DATA = `data-${VERSION}`;
 const PHOTOS = `photos-${VERSION}`;
@@ -8,7 +8,7 @@ const FILES = [
   '/js/app.js', '/js/api.js', '/js/catalog.js', '/js/i18n.js', '/js/icons.js', '/js/images.js', '/js/login.js', '/js/store.js', '/js/ui.js',
   '/js/header.js', '/js/footer.js', '/js/pages/seller.js', '/js/pages/home.js', '/js/pages/search.js', '/js/pages/item.js', '/js/pages/post.js', '/js/pages/fav.js', '/js/pages/me.js', '/js/pages/rules.js', '/js/pages/admin.js',
   '/fonts/manrope-cyrillic-wght-normal.woff2', '/fonts/manrope-cyrillic-ext-wght-normal.woff2', '/fonts/manrope-latin-wght-normal.woff2', '/fonts/manrope-latin-ext-wght-normal.woff2',
-  '/icons/icon.svg', '/icons/icon-192.png',
+  '/icons/icon.svg', '/icons/ghost.svg', '/icons/icon-192.png',
   ...['clothes', 'phones', 'electronics', 'transport', 'realty', 'kids', 'home_garden', 'beauty', 'hobby', 'repair', 'animals', 'services', 'jobs', 'other'].map((id) => `/img/cat/${id}.svg`),
 ];
 

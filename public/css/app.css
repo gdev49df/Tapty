@@ -55,9 +55,9 @@ h2 { font-size: 18px; line-height: 1.35; font-weight: 600; }
 #view { padding: var(--safe-t) 16px calc(var(--tabs) + var(--safe-b) + 32px); max-width: 1180px; margin: 0 auto; }
 .has-footer #view { min-height: 100dvh; padding-bottom: 48px; }
 
-/* ---------- логотип: ярлычок с отверстием ---------- */
+/* ---------- логотип: призрак и название ---------- */
 .logo { display: inline-flex; align-items: center; gap: 8px; font-weight: 800; font-size: 24px; letter-spacing: -.045em; line-height: 1; }
-.logo::before { content: ''; width: 26px; height: 20px; background: radial-gradient(circle at 9px 50%, var(--bg) 0 3px, transparent 3.5px), var(--accent); clip-path: polygon(0 50%, 32% 0, 100% 0, 100% 100%, 32% 100%); border-radius: 3px; }
+.logo::before { content: ''; width: 1.08em; height: 1.16em; flex: none; background: url('/icons/ghost.svg') center / contain no-repeat; }
 
 /* ---------- нижнее меню ---------- */
 #tabs { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(4, 1fr); height: calc(var(--tabs) + var(--safe-b)); padding-bottom: var(--safe-b); background: var(--bg); border-top: 1px solid var(--line); }
@@ -145,7 +145,7 @@ body[data-page='home'] #view, body[data-page='search'] #view { padding-top: 0; }
 .empty { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; padding: 48px 20px; }
 .empty p { color: var(--muted); max-width: 36ch; }
 .empty .btn { margin-top: 12px; }
-.empty-tag { width: 76px; height: 56px; margin-bottom: 12px; background: radial-gradient(circle at 25px 50%, var(--bg) 0 7px, transparent 7.5px), var(--surface-2); clip-path: polygon(0 50%, 32% 0, 100% 0, 100% 100%, 32% 100%); transform: rotate(-14deg); }
+.empty-ghost { width: 72px; height: 76px; margin-bottom: 12px; background: var(--surface-2); -webkit-mask: url('/icons/ghost.svg') center / contain no-repeat; mask: url('/icons/ghost.svg') center / contain no-repeat; }
 
 /* ---------- кнопки и поля ---------- */
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 8px 20px; border-radius: var(--r); background: var(--accent); color: #fff; font-weight: 600; text-align: center; line-height: 20px; transition: background-color .15s var(--ease), transform .1s var(--ease); }

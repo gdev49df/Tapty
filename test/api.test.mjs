@@ -230,7 +230,7 @@ try {
 
   await test('превью ссылки и обычные страницы', async () => {
     const page = await call(`/item/${id}`);
-    assert.match(page.data, /<title>Велосипед горный — Tapty<\/title>/);
+    assert.match(page.data, /<title>Велосипед горный — tapty\.<\/title>/);
     assert.match(page.data, new RegExp(`/p/${photo}`));
     for (const path of ['/', '/search', '/me', '/new', `/seller/${id}`]) {
       const r = await fetch(BASE + path, { headers: { accept: 'text/html', 'sec-fetch-mode': 'navigate' } });

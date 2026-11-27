@@ -109,12 +109,12 @@ async function itemPage(request, env, url, id) {
   const photo = JSON.parse(row.photos)[0];
   const meta = {
     'og:title': `${row.title}, ${price}`,
-    'og:description': `${city}. Объявление на Tapty`,
+    'og:description': `${city}. Объявление на tapty.`,
     'og:url': `${url.origin}/item/${id}`,
     'og:image': photo ? `${url.origin}/p/${photo}` : `${url.origin}/icons/icon-512.png`,
   };
   return new HTMLRewriter()
-    .on('title', { element: (el) => el.setInnerContent(`${row.title} — Tapty`) })
+    .on('title', { element: (el) => el.setInnerContent(`${row.title} — tapty.`) })
     .on('meta[property^="og:"]', {
       element: (el) => {
         const value = meta[el.getAttribute('property')];
