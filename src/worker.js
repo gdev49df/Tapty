@@ -158,7 +158,7 @@ async function itemPage(request, env, url, id) {
     'og:title': `${row.title}, ${price}`,
     'og:description': `${city}. Объявление на tapty.`,
     'og:url': `${url.origin}/item/${id}`,
-    'og:image': photo ? `${url.origin}/p/${photo}` : `${url.origin}/icons/icon-512.png`,
+    'og:image': photo ? `${url.origin}/p/${photo}` : `${url.origin}/icons/logo-share.png`,
   };
   return new HTMLRewriter()
     .on('title', { element: (el) => el.setInnerContent(`${row.title} — tapty.`) })

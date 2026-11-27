@@ -23,7 +23,7 @@ function draw() {
   root.innerHTML = `
     <div class="promo-clip">
       <div class="promo-row">
-        <img src="/img/mark3d.webp" alt="" width="64" height="64">
+        <img src="/img/logo.webp" alt="" width="64" height="64">
         <p>${esc(t('promoText'))} ${names.join(` ${esc(t('promoAnd'))} `)}</p>
         <button type="button" aria-label="${esc(t('close'))}">${icon('close')}</button>
       </div>
