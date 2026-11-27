@@ -2,6 +2,8 @@
 // Пароль на сервер не приходит: браузер прогоняет его через PBKDF2 (долгий расчёт, на воркере
 // он не уложился бы в лимит процессорного времени) и присылает ключ. В базе лежит только
 // солёный хеш этого ключа.
+import { LEGAL_VERSION } from '../public/js/catalog.js';
+import { deletePhotoFiles } from './photos.js';
 import { attempt, fail, json, limit, now, randomHex, readJson, safeEqual, sha256 } from './util.js';
 
 const LOGIN = /^[a-z0-9_.]{3,24}$/;
@@ -55,14 +57,16 @@ export async function register(request, env, who) {
   const { body, login, key } = await credentials(request);
   const name = String(body.name ?? '').replace(/\s+/g, ' ').trim();
   if (name.length < 2 || name.length > 40) fail(400, 'invalid', 'name');
+  // Без согласия с действующей редакцией документов аккаунт не создаётся.
+  if (body.consent !== LEGAL_VERSION) fail(400, 'consent');
   await limit(env, `register:${who.ip}`, 20, 86400);
   const id = `u:${randomHex(12)}`;
   const code = await newCode();
   const created = await env.DB.prepare(
-    `INSERT OR IGNORE INTO users (id, name, created_at, login, pass_hash, pass_salt, rec_hash, rec_salt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
+    `INSERT OR IGNORE INTO users (id, name, created_at, login, pass_hash, pass_salt, rec_hash, rec_salt, consent_at, consent_version)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?3, ?9) RETURNING id`
   )
-    .bind(id, name, now(), login, ...(await passwordColumns(key)), code.hash, code.salt)
+    .bind(id, name, now(), login, ...(await passwordColumns(key)), code.hash, code.salt, LEGAL_VERSION)
     .first();
   if (!created) fail(409, 'login_taken', 'login');
   return open(env, who, { id, name, login }, { code: code.shown });
@@ -128,6 +132,46 @@ export async function replaceCode(request, env, who) {
   const code = await newCode();
   await env.DB.prepare('UPDATE users SET rec_hash = ?, rec_salt = ? WHERE id = ?').bind(code.hash, code.salt, who.owner).run();
   return json({ code: code.shown });
+}
+
+// Всё, что принадлежит человеку: ?1 — номер аккаунта. Порядок важен — чаты и объявления
+// удаляются после того, что на них ссылается. Записи о блокировке нарушителей остаются.
+const MY_CHATS = 'SELECT id FROM chats WHERE buyer = ?1 OR seller = ?1';
+const MY_ADS = 'SELECT id FROM listings WHERE owner = ?1';
+const MY_PHOTOS = `owner = ?1 OR listing_id IN (${MY_ADS}) OR chat_id IN (${MY_CHATS})`;
+const ERASE = [
+  `DELETE FROM photos WHERE ${MY_PHOTOS}`,
+  `DELETE FROM messages WHERE chat_id IN (${MY_CHATS})`,
+  `DELETE FROM complaints WHERE reporter = ?1 OR chat_id IN (${MY_CHATS})`,
+  'DELETE FROM chats WHERE buyer = ?1 OR seller = ?1',
+  `DELETE FROM reports WHERE listing_id IN (${MY_ADS})`,
+  `DELETE FROM favorites WHERE user_id = ?1 OR listing_id IN (${MY_ADS})`,
+  'DELETE FROM listings WHERE owner = ?1',
+  'DELETE FROM reviews WHERE author = ?1 OR seller = ?1',
+  'DELETE FROM blocks WHERE blocker = ?1 OR blocked = ?1',
+  'DELETE FROM sessions WHERE user_id = ?1',
+  'DELETE FROM users WHERE id = ?1',
+];
+
+export async function deleteAccount(request, env, who) {
+  await confirmPassword(request, env, who);
+  // Пока модератор не разобрался, переписку и объявление, на которые пожаловались, стереть кнопкой нельзя.
+  // У заблокированного разбирательство уже закончено.
+  const held = await env.DB.prepare(
+    `SELECT 1 WHERE EXISTS (SELECT 1 FROM complaints WHERE target = ?1)
+       OR (EXISTS (SELECT 1 FROM listings WHERE owner = ?1 AND status = 'hidden')
+           AND NOT EXISTS (SELECT 1 FROM bans WHERE value = ?1))`
+  )
+    .bind(who.owner)
+    .first();
+  if (held) fail(409, 'under_review');
+  // Если фото лежат в R2, сначала убираются файлы: после записей в базе их уже не найти.
+  if (env.PHOTOS) {
+    const { results } = await env.DB.prepare(`SELECT id FROM photos WHERE ${MY_PHOTOS}`).bind(who.owner).all();
+    await deletePhotoFiles(env, results.map((r) => r.id));
+  }
+  await env.DB.batch(ERASE.map((sql) => env.DB.prepare(sql).bind(who.owner)));
+  return json({ ok: true });
 }
 
 export async function signOut(env, who) {

@@ -37,6 +37,17 @@ export async function signOut() {
   dropSession();
 }
 
+// Аккаунт удалён: на устройстве не остаётся ничего из того, что с ним связано.
+export function forgetAccount() {
+  for (const name of ['seller', 'draft', 'key']) store.del(name);
+  // и сохранённые для работы без интернета объявления и фото
+  globalThis.caches
+    ?.keys()
+    .then((names) => Promise.all(names.filter((n) => /^(data|photos)-/.test(n)).map((n) => caches.delete(n))))
+    .catch(() => {});
+  dropSession();
+}
+
 export class ApiError extends Error {
   constructor(status, code, field) {
     super(code);

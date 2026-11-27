@@ -12,6 +12,7 @@ import post from './pages/post.js';
 import fav from './pages/fav.js';
 import me from './pages/me.js';
 import rules from './pages/rules.js';
+import legal from './pages/legal.js';
 import chats from './pages/chats.js';
 import chatPage from './pages/chat.js';
 import { closeViewer } from './viewer.js';
@@ -38,6 +39,7 @@ const ROUTES = [
   [/^\/chat\/(\d+)$/, chatPage, 'chats'],
   [/^\/me$/, me, 'me'],
   [/^\/rules$/, rules, 'me'],
+  [/^\/(offer|privacy|consent)$/, legal, 'me'],
   [/^\/admin$/, admin, ''],
 ];
 

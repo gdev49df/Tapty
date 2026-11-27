@@ -89,9 +89,16 @@ export async function servePhoto(request, env, ctx, id, variant) {
   return response;
 }
 
+// Файлы в R2; за один раз хранилище принимает не больше тысячи имён.
+export async function deletePhotoFiles(env, ids) {
+  if (!env.PHOTOS) return;
+  const names = ids.flatMap((id) => [`${id}/full`, `${id}/thumb`]);
+  for (let i = 0; i < names.length; i += 1000) await env.PHOTOS.delete(names.slice(i, i + 1000));
+}
+
 export async function deletePhotos(env, ids) {
   if (!ids.length) return;
-  if (env.PHOTOS) await env.PHOTOS.delete(ids.flatMap((id) => [`${id}/full`, `${id}/thumb`]));
+  await deletePhotoFiles(env, ids);
   const marks = ids.map(() => '?').join(',');
   await env.DB.prepare(`DELETE FROM photos WHERE id IN (${marks})`).bind(...ids).run();
 }

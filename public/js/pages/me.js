@@ -1,5 +1,5 @@
 import { api, currentUser, signOut } from '../api.js';
-import { authForm, codeSheet, passwordSheet } from '../auth.js';
+import { authForm, codeSheet, deleteSheet, passwordSheet } from '../auth.js';
 import { icon } from '../icons.js';
 import { lang, t } from '../i18n.js';
 import { store } from '../store.js';
@@ -32,9 +32,11 @@ export default async function me({ root, alive, rerender }) {
         <ul class="menu">
           <li><button data-security="password">${icon('lock')}<span>${esc(t('changePassword'))}</span><small></small>${icon('next')}</button></li>
           <li><button data-security="code">${icon('key')}<span>${esc(t('codeTitle'))}</span><small${user.recovery ? '' : ' class="todo"'}>${esc(t(user.recovery ? 'codeExists' : 'codeMissing'))}</small>${icon('next')}</button></li>
+          <li><button class="danger" data-security="delete">${icon('trash')}<span>${esc(t('deleteAccount'))}</span><small></small>${icon('next')}</button></li>
         </ul>`;
+      const security = { password: () => passwordSheet(user), code: () => codeSheet(user, rerender), delete: () => deleteSheet(user, rerender) };
       $$('[data-security]', account).forEach((b) => {
-        b.onclick = () => (b.dataset.security === 'password' ? passwordSheet(user) : codeSheet(user, rerender));
+        b.onclick = security[b.dataset.security];
       });
       $('[data-logout]', account).onclick = async () => {
         await signOut();
@@ -127,7 +129,9 @@ export default async function me({ root, alive, rerender }) {
       row('city', 'pin', t('city'), city ? cityName(city) : t('allKz')) +
       row('lang', 'globe', t('language'), lang() === 'kk' ? 'Қазақша' : 'Русский') +
       (standalone ? '' : row('install', 'download', t('install'))) +
-      `<li><a href="/rules">${icon('file')}<span>${esc(t('rules'))}</span><small></small>${icon('next')}</a></li>`;
+      ['rules', 'offer', 'privacy', 'consent']
+        .map((name) => `<li><a href="/${name}">${icon('file')}<span>${esc(t(name))}</span><small></small>${icon('next')}</a></li>`)
+        .join('');
     menu.onclick = async (e) => {
       const name = e.target.closest('[data-menu]')?.dataset.menu;
       if (name === 'city') {

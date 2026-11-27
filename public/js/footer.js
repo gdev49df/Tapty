@@ -19,7 +19,7 @@ function draw() {
       </div>
       ${column(t('forBuyers'), [['/', t('allAds')], ['/fav', t('fav')], ['/chats', t('messages')]])}
       ${column(t('forSellers'), [['/new', t('postAd')], ['/me', t('myAds')]])}
-      ${column(t('help'), [['/rules', t('rules')]])}
+      ${column(t('help'), [['/rules', t('rules')], ['/offer', t('offer')], ['/privacy', t('privacy')], ['/consent', t('consent')]])}
       <p class="foot-credit">Разработано gDev</p>
     </div>`;
 }

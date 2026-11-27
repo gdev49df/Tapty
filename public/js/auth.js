@@ -1,5 +1,6 @@
 // Вход, регистрация, восстановление и смена пароля.
-import { ApiError, api, auth, setSession } from './api.js';
+import { ApiError, api, auth, forgetAccount, setSession } from './api.js';
+import { LEGAL_VERSION } from './catalog.js';
 import { icon } from './icons.js';
 import { t } from './i18n.js';
 import { $, $$, errorText, esc, sheet, toast } from './ui.js';
@@ -52,6 +53,19 @@ const passwordField = (name, label, autocomplete, hint) =>
     `type="password" maxlength="100" autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="${autocomplete}"`,
     hint
   );
+
+// Отметки о согласии: по умолчанию пустые, без каждой из них регистрация не проходит.
+const AGREE = ['agreeOffer', 'agreeData', 'agreeAge'];
+const DOC_OF = { agreeOffer: 'offer', agreeData: 'consent', agreePolicy: 'privacy' };
+
+// Часть строки в фигурных скобках становится ссылкой на документ. Открывается рядом, чтобы не потерять набранное.
+const withLink = (name) =>
+  esc(t(name)).replace(/\{(.+?)\}/, (_, text) => `<a href="/${DOC_OF[name]}" target="_blank" rel="noopener">${text}</a>`);
+
+const agreeBoxes = () =>
+  `<div class="agree">${AGREE.map(
+    (name) => `<div data-field="${name}"><label class="check"><input type="checkbox" name="${name}"><span>${withLink(name)}</span></label><em></em></div>`
+  ).join('')}<p class="muted small">${withLink('agreePolicy')}</p></div>`;
 
 function showPassword(eye, visible) {
   const input = eye.previousElementSibling;
@@ -155,6 +169,7 @@ export function authForm(root, { onDone, note = '', mode = 'login' }) {
             mode === 'login' ? 'current-password' : 'new-password',
             mode === 'login' ? '' : t('passwordRule')
           )}
+          ${signup ? agreeBoxes() : ''}
           <p class="form-error" role="alert"></p>
           <button class="btn wide">${esc(t(button))}</button>
           ${signup ? `<p class="muted small">${esc(t('codeLater'))}</p>` : ''}
@@ -163,7 +178,10 @@ export function authForm(root, { onDone, note = '', mode = 'login' }) {
         </form>
       </div>`;
     const form = $('form', root);
-    for (const [name, value] of Object.entries(typed)) if (form.elements[name]) form.elements[name].value = value;
+    for (const [name, value] of Object.entries(typed)) {
+      const input = form.elements[name];
+      if (input && input.type !== 'checkbox') input.value = value;
+    }
 
     $$('[data-mode]', root).forEach((b) => {
       b.onclick = () => {
@@ -184,12 +202,15 @@ export function authForm(root, { onDone, note = '', mode = 'login' }) {
         const { value: password } = form.elements.password;
         if (password.length < (mode === 'login' ? 1 : MIN)) return ['password', t('passwordRule')];
         if (mode !== 'login' && weakPassword(value('login').toLowerCase(), password)) return ['password', t('passwordWeak')];
-        return null;
+        const missed = signup && AGREE.find((name) => !form.elements[name].checked);
+        return missed ? [missed, t('agreeNeeded')] : null;
       },
       async () => {
         const login = value('login').toLowerCase();
         const key = await deriveKey(login, form.elements.password.value);
-        const res = await api(`/auth/${mode}`, { method: 'POST', body: { login, key, name: value('name'), code: value('code') } });
+        const body = { login, key, name: value('name'), code: value('code') };
+        if (signup) body.consent = LEGAL_VERSION;
+        const res = await api(`/auth/${mode}`, { method: 'POST', body });
         setSession(res);
         if (res.code) return codeView(root, res.code, () => onDone(res.user));
         toast(t('loggedIn'));
@@ -256,6 +277,34 @@ export function codeSheet(user, onDone) {
         onDone();
       });
       $('h3', s.body).remove(); // заголовок уже есть у шторки
+    }
+  );
+}
+
+// Удаление аккаунта: предупреждение и текущий пароль.
+export function deleteSheet(user, onDone) {
+  const s = sheet(
+    `<form class="form" novalidate>
+      <p>${esc(t('deleteAbout'))}</p>
+      <input type="text" autocomplete="username" value="${esc(user.login)}" hidden>
+      ${passwordField('password', t('fPassword'), 'current-password')}
+      <p class="form-error" role="alert"></p>
+      <button class="btn wide danger">${esc(t('deleteForever'))}</button>
+    </form>`,
+    { title: t('deleteAccount') }
+  );
+  const form = $('form', s.body);
+  const { password } = form.elements;
+  bindForm(
+    form,
+    () => (password.value ? null : ['password', t('enterPassword')]),
+    async () => {
+      const key = await deriveKey(user.login, password.value);
+      await api('/auth/delete', { method: 'POST', body: { key } });
+      s.close();
+      forgetAccount();
+      toast(t('accountDeleted'));
+      onDone();
     }
   );
 }

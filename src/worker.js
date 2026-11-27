@@ -3,7 +3,7 @@ import { DAY, HttpError, fail, insecure, json, network, now, randomHex, sha256 }
 import { openAdmin, requireAdmin } from './admin.js';
 import * as listings from './listings.js';
 import { servePhoto, uploadPhoto } from './photos.js';
-import { SESSION_DAYS, changePassword, recover, register, replaceCode, requireUser, signIn, signOut } from './auth.js';
+import { SESSION_DAYS, changePassword, deleteAccount, recover, register, replaceCode, requireUser, signIn, signOut } from './auth.js';
 import * as chat from './chat.js';
 import * as reviews from './reviews.js';
 import * as favorites from './favorites.js';
@@ -61,6 +61,7 @@ async function api(request, env, ctx, url) {
   if (method === 'POST' && path === '/auth/recover') return recover(request, env, who);
   if (method === 'POST' && path === '/auth/password') return changePassword(request, env, who);
   if (method === 'POST' && path === '/auth/code') return replaceCode(request, env, who);
+  if (method === 'POST' && path === '/auth/delete') return deleteAccount(request, env, who);
   if (method === 'GET' && path === '/price-hint') return listings.priceHint(env, url, who);
 
   if (path === '/favorites') {

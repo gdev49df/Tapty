@@ -9,6 +9,7 @@ import { createHash, randomBytes, createHmac } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { localConfigs } from './local.mjs';
 import { parseDraft } from '../src/ai.js';
+import { LEGAL_VERSION } from '../public/js/catalog.js';
 import { insecure, network } from '../src/util.js';
 import { codeAt, secretBytes } from '../src/totp.js';
 import { sameProduct, signature } from '../src/same.js';
@@ -67,9 +68,9 @@ async function upload(token, bytes = jpeg) {
 
 // Новый аккаунт; guest — ключ устройства, с которого регистрируются.
 let logins = 0;
-async function signUp(name, { guest = key(), login = `user_${++logins}`, ip } = {}) {
+async function signUp(name, { guest = key(), login = `user_${++logins}`, ip, secret = key() } = {}) {
   const headers = ip ? { 'cf-connecting-ip': ip } : {};
-  const r = await call('/api/auth/register', { token: guest, method: 'POST', body: { login, name, key: key() }, headers });
+  const r = await call('/api/auth/register', { token: guest, method: 'POST', body: { login, name, key: secret, consent: LEGAL_VERSION }, headers });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   return r.data.token;
 }
@@ -79,9 +80,10 @@ const oldGuest = key();
 function runD1(args) {
   const [cmd, ...pre] = wrangler.split(' ');
   const [, config] = localConfigs();
-  execFileSync(cmd, [...pre, 'd1', 'execute', 'tapty', '--local', '--persist-to', state, '-c', config, '-y', ...args], { stdio: 'pipe' });
+  return execFileSync(cmd, [...pre, 'd1', 'execute', 'tapty', '--local', '--persist-to', state, '-c', config, '-y', ...args], { stdio: 'pipe' });
 }
 const runSql = (sql) => runD1(['--command', sql]);
+const querySql = (sql) => JSON.parse(runD1(['--command', sql, '--json']).toString())[0].results;
 function prepareOldDatabase() {
   const owner = `d:${createHash('sha256').update(oldGuest).digest('hex')}`;
   runD1(['--file', fileURLToPath(new URL('old-schema.sql', import.meta.url))]);
@@ -132,7 +134,7 @@ try {
 
   await test('регистрация, вход и выход', async () => {
     const secret = key();
-    const register = (body) => call('/api/auth/register', { token: key(), method: 'POST', body });
+    const register = (body) => call('/api/auth/register', { token: key(), method: 'POST', body: { consent: LEGAL_VERSION, ...body } });
     for (const [body, field] of [
       [{ login: 'ab', name: 'Имя', key: secret }, 'login'],
       [{ login: 'логин', name: 'Имя', key: secret }, 'login'],
@@ -539,7 +541,7 @@ try {
 
   await test('резервный код: восстановление пароля, смена пароля, новый код', async () => {
     const first = key();
-    const made = (await post('/api/auth/register', key(), { login: 'roza', name: 'Роза', key: first })).data;
+    const made = (await post('/api/auth/register', key(), { login: 'roza', name: 'Роза', key: first, consent: LEGAL_VERSION })).data;
     const signIn = (k) => post('/api/auth/login', key(), { login: 'roza', key: k });
     const recover = (code, k, login = 'roza') => post('/api/auth/recover', key(), { login, code, key: k });
     const second = key();
@@ -802,7 +804,7 @@ try {
     const login = 'brute_target';
     const send = (secret, ip) =>
       call('/api/auth/login', { token: key(), method: 'POST', body: { login, key: secret }, headers: { 'cf-connecting-ip': ip } });
-    await call('/api/auth/register', { token: key(), method: 'POST', body: { login, name: 'Цель', key: password }, headers: { 'cf-connecting-ip': '198.51.100.1' } });
+    await call('/api/auth/register', { token: key(), method: 'POST', body: { login, name: 'Цель', key: password, consent: LEGAL_VERSION }, headers: { 'cf-connecting-ip': '198.51.100.1' } });
     // удачные входы в счёт не идут
     for (let i = 0; i < 3; i++) assert.equal((await send(password, '198.51.100.2')).status, 200);
     for (let i = 0; i < 50; i++) assert.equal((await send(key(), `198.51.101.${Math.floor(i / 5) + 1}`)).status, 401, `попытка ${i}`);
@@ -832,6 +834,97 @@ try {
     await start({ ADMIN_KEY: 'секрет-админа' });
     assert.equal((await call('/api/me', { token: stale })).data.user, null);
     assert.equal((await call('/api/me', { token: fresh })).data.user.name, 'Был вчера');
+  });
+
+  await test('регистрация только с согласием, дата и редакция сохраняются', async () => {
+    const send = (consent) =>
+      call('/api/auth/register', { token: key(), method: 'POST', body: { login: 'consent_one', name: 'Асель', key: key(), consent }, headers: { 'cf-connecting-ip': '203.0.113.60' } });
+    for (const consent of [undefined, true, '2000-01-01']) assert.equal((await send(consent)).data.error, 'consent');
+    assert.equal((await send(LEGAL_VERSION)).status, 200);
+    await stop();
+    const [row] = querySql("SELECT created_at, consent_at, consent_version FROM users WHERE login = 'consent_one'");
+    assert.equal(row.consent_version, LEGAL_VERSION);
+    assert.equal(row.consent_at, row.created_at);
+    await start({ ADMIN_KEY: 'секрет-админа' });
+  });
+
+  const admin = (path, body) => call(`/api/admin/${path}`, { method: body ? 'POST' : 'GET', body, headers: adminHeaders });
+
+  await test('удаление аккаунта стирает своё и не трогает чужое', async () => {
+    const ip = '203.0.113.61';
+    const secret = key();
+    const leaver = await signUp('Уходящий', { ip, login: 'leaver', secret });
+    const friend = await signUp('Остающийся', { ip });
+    const send = (path, token, body) => call(path, { token, method: 'POST', body, headers: { 'cf-connecting-ip': ip } });
+    const remove = (token, k) => send('/api/auth/delete', token, { key: k });
+    const own = (await upload(leaver)).data.id;
+    const mine = await create(leaver, { title: 'Самовар медный', phone: '77090000001', photos: [own] });
+    const theirs = await create(friend, { title: 'Ковёр шерстяной', phone: '77090000002' });
+    const toMe = (await send(`/api/listings/${mine}/chat`, friend, { text: 'Здравствуйте' })).data.chat;
+    const fromMe = (await send(`/api/listings/${theirs}/chat`, leaver, { text: 'Привет' })).data.chat;
+    await send(`/api/chats/${toMe}`, leaver, { text: 'Да' });
+    await send(`/api/chats/${fromMe}`, friend, { text: 'Да' });
+    const data = new FormData();
+    data.set('full', new Blob([jpeg]), 'full');
+    data.set('thumb', new Blob([jpeg]), 'thumb');
+    const picture = (await send(`/api/chats/${fromMe}/photo`, friend, data)).data.message.photo;
+    assert.ok((await send(`/api/listings/${theirs}/review`, leaver, { rating: 5 })).status < 300);
+    assert.ok((await send(`/api/listings/${mine}/review`, friend, { rating: 4 })).status < 300);
+    await call(`/api/favorites/${theirs}`, { token: leaver, method: 'PUT' });
+    await call(`/api/favorites/${mine}`, { token: friend, method: 'PUT' });
+
+    assert.equal((await remove(key(), secret)).data.error, 'login_required');
+    assert.equal((await remove(leaver, key())).data.error, 'wrong_password');
+    // пока жалоба не разобрана, переписка и объявление должны дождаться модератора
+    await send(`/api/chats/${toMe}/complaint`, friend, { reason: 'spam' });
+    const blocked = await remove(leaver, secret);
+    assert.deepEqual([blocked.status, blocked.data.error], [409, 'under_review']);
+    const [complaint] = (await admin('complaints')).data.items;
+    await admin(`complaints/${complaint.id}`, { action: 'dismiss' });
+    await admin(`${mine}`, { action: 'hide' });
+    assert.equal((await remove(leaver, secret)).data.error, 'under_review');
+    await admin(`${mine}`, { action: 'approve' });
+    // жалоба самого уходящего удаляется вместе с ним
+    await send(`/api/chats/${fromMe}/complaint`, leaver, { reason: 'spam' });
+    const done = await remove(leaver, secret);
+    assert.equal(done.status, 200, JSON.stringify(done.data));
+
+    assert.equal((await call('/api/me', { token: leaver })).data.user, null);
+    assert.equal((await send('/api/auth/login', key(), { login: 'leaver', key: secret })).data.error, 'bad_credentials');
+    assert.equal((await call(`/api/listings/${mine}`)).status, 404);
+    assert.equal((await fetch(`${BASE}/p/${own}`)).status, 404);
+    assert.equal((await call('/api/chats', { token: friend })).data.items.length, 0);
+    assert.equal((await call(`/api/chats/${fromMe}`, { token: friend })).status, 404);
+    assert.deepEqual((await call('/api/favorites', { token: friend })).data.ids, []);
+    assert.equal((await call(`/api/listings/${theirs}`)).data.seller.reviews, 0);
+    assert.equal((await call('/api/mine', { token: friend })).data.items.length, 1);
+    assert.equal((await admin('complaints')).data.items.length, 0);
+    // логин освободился
+    await signUp('Тот же логин', { ip, login: 'leaver' });
+
+    await stop();
+    const orphan = (table, column) => `(SELECT COUNT(*) FROM ${table} WHERE ${column} NOT IN (SELECT id FROM users)) AS ${table}_${column}`;
+    const [left] = querySql(`SELECT
+      (SELECT COUNT(*) FROM messages WHERE chat_id IN (${toMe}, ${fromMe})) AS messages,
+      (SELECT COUNT(*) FROM photos WHERE id IN ('${own}', '${picture}')) AS photos,
+      (SELECT COUNT(*) FROM favorites WHERE listing_id = ${mine}) AS favorites,
+      ${orphan('sessions', 'user_id')}, ${orphan('favorites', 'user_id')}, ${orphan('reviews', 'author')}, ${orphan('reviews', 'seller')},
+      ${orphan('chats', 'buyer')}, ${orphan('chats', 'seller')}`);
+    assert.deepEqual(Object.entries(left).filter(([, n]) => n), []);
+    await start({ ADMIN_KEY: 'секрет-админа' });
+  });
+
+  await test('заблокированный может удалить аккаунт, блокировка остаётся', async () => {
+    const ip = '203.0.113.62';
+    const secret = key();
+    const cheat = await signUp('Нарушитель', { ip, secret });
+    const goods = await create(cheat, { title: 'Дрель ударная', phone: '77090000003' });
+    await admin(`${goods}`, { action: 'ban' });
+    const done = await call('/api/auth/delete', { token: cheat, method: 'POST', body: { key: secret }, headers: { 'cf-connecting-ip': ip } });
+    assert.equal(done.status, 200, JSON.stringify(done.data));
+    const again = await signUp('Снова он', { ip });
+    const retry = await call('/api/listings', { token: again, method: 'POST', body: listing({ phone: '77090000003' }) });
+    assert.equal(retry.data.error, 'banned');
   });
 
   await test('изменения с чужих сайтов не принимаются', async () => {

@@ -51,7 +51,7 @@ const STATEMENTS = [
   )`,
   `CREATE TABLE IF NOT EXISTS bans (value TEXT PRIMARY KEY, created_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS rate (key TEXT PRIMARY KEY, count INTEGER NOT NULL, reset_at INTEGER NOT NULL)`,
-  `CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, username TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, login TEXT, pass_hash TEXT, pass_salt TEXT, rec_hash TEXT, rec_salt TEXT)`,
+  `CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, username TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, login TEXT, pass_hash TEXT, pass_salt TEXT, rec_hash TEXT, rec_salt TEXT, consent_at INTEGER, consent_version TEXT)`,
   `CREATE TABLE IF NOT EXISTS sessions (hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at INTEGER NOT NULL)`,
   // Переписка: один диалог на пару «объявление + покупатель».
   `CREATE TABLE IF NOT EXISTS chats (
@@ -104,7 +104,11 @@ const STATEMENTS = [
 // Столбцы, которых нет в базах, созданных прежними версиями сайта.
 const COLUMNS = {
   listings: { old_price: 'INTEGER NOT NULL DEFAULT 0', area: "TEXT NOT NULL DEFAULT ''" },
-  users: { login: 'TEXT', pass_hash: 'TEXT', pass_salt: 'TEXT', rec_hash: 'TEXT', rec_salt: 'TEXT' },
+  users: {
+    login: 'TEXT', pass_hash: 'TEXT', pass_salt: 'TEXT', rec_hash: 'TEXT', rec_salt: 'TEXT',
+    // когда и какую редакцию оферты и согласия человек принял; у старых аккаунтов пусто
+    consent_at: 'INTEGER', consent_version: 'TEXT',
+  },
   photos: { chat_id: 'INTEGER' },
   // у каждого участника свои «закрепить» и «удалить»: *_cleared — номер последнего удалённого у него сообщения
   chats: {
