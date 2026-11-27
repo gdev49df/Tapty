@@ -1,7 +1,7 @@
 // Проверка API на локальном воркере и временной базе: npm test
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -184,6 +184,14 @@ try {
     assert.equal((await ask(painter, photo(2))).data.error, 'ai_unclear');
     assert.equal((await ask(painter, photo(3))).data.error, 'ai_failed');
     assert.equal((await ask(painter, photo(4))).data.error, 'ai_limit');
+  });
+
+  await test('в словаре нет повторяющихся названий', async () => {
+    // повтор молча заменяет прежний перевод: так «Предложить цену» однажды стала названием оферты
+    const source = readFileSync(new URL('../public/js/i18n.js', import.meta.url), 'utf8');
+    const names = [...source.matchAll(/^  (\w+): \[/gm)].map((m) => m[1]);
+    assert.ok(names.length > 200);
+    assert.deepEqual(names.filter((n, i) => names.indexOf(n) !== i), []);
   });
 
   await test('разбор ответа модели', async () => {

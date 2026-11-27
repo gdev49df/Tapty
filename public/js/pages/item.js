@@ -93,8 +93,7 @@ export default async function itemPage({ root, params, alive, back, go, rerender
           ${
             canWrite && !auth.signedIn()
               ? `<section class="write"><h2>${esc(t('writeSeller'))}</h2>
-                  <p class="muted">${esc(t('authChat'))}</p>
-                  <button type="button" class="btn" data-login>${esc(t('loginToWrite'))}</button>
+                  <button type="button" class="btn wide" data-login>${icon('chat')}${esc(t('loginToWrite'))}</button>
                 </section>`
               : canWrite
               ? `<section class="write"><h2>${esc(t('writeSeller'))}</h2>

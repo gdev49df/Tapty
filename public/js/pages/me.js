@@ -129,8 +129,8 @@ export default async function me({ root, alive, rerender }) {
       row('city', 'pin', t('city'), city ? cityName(city) : t('allKz')) +
       row('lang', 'globe', t('language'), lang() === 'kk' ? 'Қазақша' : 'Русский') +
       (standalone ? '' : row('install', 'download', t('install'))) +
-      ['rules', 'offer', 'privacy', 'consent']
-        .map((name) => `<li><a href="/${name}">${icon('file')}<span>${esc(t(name))}</span><small></small>${icon('next')}</a></li>`)
+      [['rules', 'rules'], ['offer', 'doc_offer'], ['privacy', 'doc_privacy'], ['consent', 'doc_consent']]
+        .map(([path, title]) => `<li><a href="/${path}">${icon('file')}<span>${esc(t(title))}</span><small></small>${icon('next')}</a></li>`)
         .join('');
     menu.onclick = async (e) => {
       const name = e.target.closest('[data-menu]')?.dataset.menu;

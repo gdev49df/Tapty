@@ -163,7 +163,7 @@ const CONSENT = [
   ]],
 ];
 
-// Ключ — адрес страницы и он же название в словаре.
+// Ключ — адрес страницы; название в словаре — с приставкой doc_.
 const DOCS = { offer: OFFER, privacy: PRIVACY, consent: CONSENT };
 
 function card([title, value]) {
@@ -181,9 +181,10 @@ function block(b) {
 
 export default function legal({ root, params, back }) {
   const [name] = params;
-  document.title = `${t(name)} — tapty.`;
+  const title = t(`doc_${name}`);
+  document.title = `${title} — tapty.`;
   root.innerHTML = `
-    <div class="page-head"><button class="icon-btn" data-back aria-label="${esc(t('back'))}">${icon('back')}</button><h1>${esc(t(name))}</h1></div>
+    <div class="page-head"><button class="icon-btn" data-back aria-label="${esc(t('back'))}">${icon('back')}</button><h1>${esc(title)}</h1></div>
     <div class="narrow prose doc">
       ${lang() === 'kk' ? '<p class="muted">Құжат мәтіні әзірге тек орыс тілінде.</p>' : ''}
       <div lang="ru">
