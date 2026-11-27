@@ -64,11 +64,14 @@ h2 { font-size: 18px; line-height: 1.35; font-weight: 600; }
 .logo b { color: var(--accent); font-weight: inherit; }
 
 /* ---------- полоса про соцсети ---------- */
-#promo { padding: var(--safe-t) 16px 0; background: var(--surface); }
-#promo > div { display: flex; align-items: center; justify-content: center; gap: 16px; max-width: 920px; min-height: 80px; margin: 0 auto; }
+#promo { display: grid; grid-template-rows: 0fr; padding-top: var(--safe-t); transition: grid-template-rows .45s cubic-bezier(.22, 1, .36, 1), background-color .45s; }
+#promo.open { grid-template-rows: 1fr; background: var(--surface); }
+.promo-clip { min-height: 0; overflow: hidden; visibility: hidden; opacity: 0; transition: opacity .3s, visibility 0s .45s; }
+.open > .promo-clip { visibility: visible; opacity: 1; transition: opacity .45s; }
+.promo-row { display: flex; align-items: center; justify-content: center; gap: 16px; max-width: 952px; min-height: 80px; margin: 0 auto; padding: 0 16px; }
 #promo img { flex: none; width: 48px; height: 48px; filter: drop-shadow(0 6px 8px rgba(20, 12, 40, .22)); }
 #promo p { flex: 1; min-width: 0; font-size: 14px; line-height: 1.45; }
-#promo a { color: var(--accent-ink); font-weight: 500; }
+#promo p a, #promo p span { color: var(--accent-ink); font-weight: 500; }
 #promo a:hover { text-decoration: underline; }
 #promo button { display: grid; place-items: center; flex: none; width: 40px; height: 40px; margin-right: -8px; border-radius: var(--r); color: var(--muted); }
 #promo button:hover { background: var(--surface-2); color: var(--text); }
@@ -557,7 +560,7 @@ body[data-page='item'] #toast { bottom: calc(var(--safe-b) + 96px); }
   .v-prev, .v-next { display: grid; }
   body[data-page='chat'] #view { padding-block: 0; }
   .chat { min-height: calc(100dvh - 85px); }
-  #promo > div { min-height: 96px; gap: 24px; }
+  .promo-row { min-height: 96px; gap: 24px; }
   #promo img { width: 64px; height: 64px; }
   #promo p { flex: 0 1 auto; margin-right: auto; }
   .chat-top { top: 85px; }
