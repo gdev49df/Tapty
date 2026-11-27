@@ -185,7 +185,7 @@ export const skeleton = (n = 10) =>
   Array.from({ length: n }, () => '<div class="card skel" aria-hidden="true"><span class="card-photo"></span><span></span><span></span></div>').join('');
 
 export function emptyState(title, hint, action = '') {
-  return `<div class="empty"><div class="empty-ghost" aria-hidden="true"></div><h2>${esc(title)}</h2><p>${esc(hint)}</p>${action}</div>`;
+  return `<div class="empty"><div class="empty-mark" aria-hidden="true"></div><h2>${esc(title)}</h2><p>${esc(hint)}</p>${action}</div>`;
 }
 
 // Бесконечная лента: догружает следующую порцию, когда низ списка близко.
