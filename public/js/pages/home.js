@@ -18,7 +18,7 @@ export default function home({ root, alive, onLeave, restored }) {
       <div class="cats" role="group" aria-label="${esc(t('category'))}">
         ${CATEGORIES.map(
           (c) => `<button class="cat" data-cat="${c.id}" aria-pressed="${c.id === cat}">
-              <span><img src="/img/cat/${c.id}.webp" alt="" width="96" height="96" decoding="async"></span>${esc(label(c))}</button>`
+              <span><img src="/img/cat/${c.id}.svg" alt="" width="44" height="44" decoding="async"></span>${esc(label(c))}</button>`
         ).join('')}
       </div>
       <button class="cats-arrow prev" aria-label="${esc(t('scrollBack'))}" hidden>${icon('back')}</button>

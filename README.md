@@ -48,9 +48,9 @@
 меняются в начале `src/ai.js`. Если кнопка не срабатывает, причина последнего сбоя лежит в базе:
 `SELECT value FROM meta WHERE key = 'ai_error'`.
 
-## Картинки категорий
+## Значки категорий
 
-[Fluent Emoji](https://github.com/microsoft/fluentui-emoji) от Microsoft, лицензия MIT: `public/img/cat/LICENSE.txt`.
+[Phosphor Icons](https://github.com/phosphor-icons/core), начертание duotone, лицензия MIT: `public/img/cat/LICENSE.txt`.
 
 ## Локально
 
