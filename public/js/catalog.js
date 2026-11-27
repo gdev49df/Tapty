@@ -43,6 +43,28 @@ export const CITIES = [
   { id: 'zhanaozen', ru: 'Жанаозен', kk: 'Жаңаөзен' },
 ];
 
+// Районы городов, где без них карта и поиск получаются слишком грубыми.
+export const AREAS = {
+  astana: [
+    { id: 'ast_almaty', ru: 'Алматинский район', kk: 'Алматы ауданы' },
+    { id: 'ast_baikonyr', ru: 'Байконурский район', kk: 'Байқоңыр ауданы' },
+    { id: 'ast_esil', ru: 'Есильский район', kk: 'Есіл ауданы' },
+    { id: 'ast_nura', ru: 'Район Нура', kk: 'Нұра ауданы' },
+    { id: 'ast_saraishyk', ru: 'Район Сарайшык', kk: 'Сарайшық ауданы' },
+    { id: 'ast_saryarka', ru: 'Район Сарыарка', kk: 'Сарыарқа ауданы' },
+  ],
+  almaty: [
+    { id: 'alm_alatau', ru: 'Алатауский район', kk: 'Алатау ауданы' },
+    { id: 'alm_almaly', ru: 'Алмалинский район', kk: 'Алмалы ауданы' },
+    { id: 'alm_auezov', ru: 'Ауэзовский район', kk: 'Әуезов ауданы' },
+    { id: 'alm_bostandyk', ru: 'Бостандыкский район', kk: 'Бостандық ауданы' },
+    { id: 'alm_zhetysu', ru: 'Жетысуский район', kk: 'Жетісу ауданы' },
+    { id: 'alm_medeu', ru: 'Медеуский район', kk: 'Медеу ауданы' },
+    { id: 'alm_nauryzbai', ru: 'Наурызбайский район', kk: 'Наурызбай ауданы' },
+    { id: 'alm_turksib', ru: 'Турксибский район', kk: 'Түрксіб ауданы' },
+  ],
+};
+
 export const PRICE_TYPES = ['fixed', 'bargain', 'exchange', 'free'];
 export const CONDITIONS = ['new', 'used'];
 export const REPORT_REASONS = ['fraud', 'banned', 'sold', 'wrong', 'other'];

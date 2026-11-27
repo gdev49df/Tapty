@@ -3,15 +3,16 @@ import { CATEGORIES, CONDITIONS, PRICE_TYPES } from '../catalog.js';
 import { icon } from '../icons.js';
 import { label, t } from '../i18n.js';
 import { store } from '../store.js';
-import { $, cityOptions, emptyState, esc, feed, pick, sheet } from '../ui.js';
+import { $, areaOptions, cityOptions, emptyState, esc, feed, pick, sheet } from '../ui.js';
 
-const KEYS = ['q', 'cat', 'city', 'min', 'max', 'cond', 'type', 'sort'];
+const KEYS = ['q', 'cat', 'city', 'area', 'min', 'max', 'cond', 'type', 'sort'];
 
 let cache = null; // результаты для возврата «назад»
 
 export default function search({ root, query, alive, onLeave, go, restored }) {
   const filters = Object.fromEntries(KEYS.map((k) => [k, query.get(k) || '']));
   if (!query.has('city')) filters.city = store.get('city', '');
+  if (!areaOptions(filters.city).some((a) => a.value === filters.area)) filters.area = '';
   const sorts = [
     { value: '', label: t('sortNew') },
     { value: 'cheap', label: t('sortCheap') },
@@ -100,6 +101,7 @@ export default function search({ root, query, alive, onLeave, go, restored }) {
   function setCity(value) {
     if (value === filters.city) return;
     filters.city = value;
+    filters.area = '';
     store.set('city', value);
   }
 
@@ -108,12 +110,16 @@ export default function search({ root, query, alive, onLeave, go, restored }) {
       [['', t('any')], ...values.map((v) => [v, t(v)])]
         .map(([v, text]) => `<label class="seg"><input type="radio" name="${name}" value="${v}"${filters[name] === v ? ' checked' : ''}><span>${esc(text)}</span></label>`)
         .join('');
+    const options = (list, selected) =>
+      list.map((o) => `<option value="${o.value}"${selected === o.value ? ' selected' : ''}>${esc(o.label)}</option>`).join('');
+    const areas = (city, selected) => options([{ value: '', label: t('anyArea') }, ...areaOptions(city)], selected);
     const s = sheet(
       `<form class="form">
         <label class="field"><span>${esc(t('city'))}</span>
-          <select class="input" name="city">${[{ value: '', label: t('allKz') }, ...cityOptions()]
-            .map((o) => `<option value="${o.value}"${filters.city === o.value ? ' selected' : ''}>${esc(o.label)}</option>`)
-            .join('')}</select>
+          <select class="input" name="city">${options([{ value: '', label: t('allKz') }, ...cityOptions()], filters.city)}</select>
+        </label>
+        <label class="field" data-area${areaOptions(filters.city).length ? '' : ' hidden'}><span>${esc(t('fArea'))}</span>
+          <select class="input" name="area">${areas(filters.city, filters.area)}</select>
         </label>
         <fieldset><legend>${esc(t('price'))}, ₸</legend>
           <div class="row">
@@ -131,16 +137,22 @@ export default function search({ root, query, alive, onLeave, go, restored }) {
       { title: t('filters') }
     );
     const form = $('form', s.body);
+    form.elements.city.onchange = () => {
+      const city = form.elements.city.value;
+      form.elements.area.innerHTML = areas(city, city === filters.city ? filters.area : '');
+      $('[data-area]', form).hidden = !areaOptions(city).length;
+    };
     form.onsubmit = (e) => {
       e.preventDefault();
       const data = new FormData(form);
       for (const k of ['min', 'max']) filters[k] = String(data.get(k) || '').replace(/\D/g, '');
       for (const k of ['cond', 'type']) filters[k] = String(data.get(k) || '');
       setCity(String(data.get('city') || ''));
+      filters.area = String(data.get('area') || '');
       apply();
     };
     $('[data-reset]', form).onclick = () => {
-      filters.min = filters.max = filters.cond = filters.type = '';
+      filters.min = filters.max = filters.cond = filters.type = filters.area = '';
       setCity('');
       apply();
     };

@@ -1,11 +1,11 @@
-import { api, auth, config, currentUser } from '../api.js';
+import { api, currentUser, signOut } from '../api.js';
+import { authForm } from '../auth.js';
 import { icon } from '../icons.js';
 import { lang, t } from '../i18n.js';
-import { loginBlock } from '../login.js';
 import { store } from '../store.js';
-import { $, cityName, cityOptions, copyText, dateText, errorText, esc, pick, priceText, sheet, toast } from '../ui.js';
+import { $, cityName, cityOptions, dateText, errorText, esc, initial, pick, priceText, sheet, toast } from '../ui.js';
 
-export default async function me({ root, alive, rerender, onLeave }) {
+export default async function me({ root, alive, rerender }) {
   root.innerHTML = `
     <div class="page-head"><h1>${esc(t('me'))}</h1></div>
     <div class="narrow">
@@ -20,27 +20,25 @@ export default async function me({ root, alive, rerender, onLeave }) {
   const account = $('.account', root);
 
   try {
-    const [cfg, user] = await Promise.all([config(), currentUser()]);
+    const user = await currentUser();
     if (!alive()) return;
     if (user) {
       account.innerHTML = `
         <div class="seller">
-          <span class="avatar" aria-hidden="true">${esc([...user.name][0]?.toUpperCase() || '?')}</span>
-          <div><strong>${esc(user.name)}</strong><small>${user.username ? `@${esc(user.username)}` : 'Telegram'}</small></div>
+          <span class="avatar" aria-hidden="true">${initial(user.name)}</span>
+          <div><strong>${esc(user.name)}</strong><small>${esc(user.login)}</small></div>
           <button class="icon-btn" data-logout aria-label="${esc(t('logout'))}">${icon('logout')}</button>
         </div>`;
       $('[data-logout]', account).onclick = async () => {
-        await api('/auth/logout', { method: 'POST' }).catch(() => {});
-        store.del('session');
+        await signOut();
         rerender();
       };
-    } else if (cfg.telegram) {
-      loginBlock(account, { onDone: rerender, onLeave });
     } else {
-      keyPanel(account);
+      authForm(account, { note: t('authWhy'), onDone: rerender });
     }
-  } catch {
+  } catch (e) {
     if (!alive()) return;
+    account.innerHTML = `<p class="muted">${esc(errorText(e))}</p>`;
   }
   await loadMine();
 
@@ -111,35 +109,6 @@ export default async function me({ root, alive, rerender, onLeave }) {
       run();
     };
   });
-
-  function keyPanel(box) {
-    box.innerHTML = `
-      <div class="panel">
-        <h2>${icon('key')}${esc(t('keyTitle'))}</h2>
-        <p class="muted">${esc(t('keyHint'))}</p>
-        <div class="stack">
-          <button class="btn ghost" data-copy>${icon('copy')}${esc(t('keyCopy'))}</button>
-          <button class="link-btn" data-enter>${esc(t('keyEnter'))}</button>
-        </div>
-      </div>`;
-    $('[data-copy]', box).onclick = () => copyText(auth.deviceKey());
-    $('[data-enter]', box).onclick = () => {
-      const s = sheet(
-        `<p class="muted">${esc(t('keyReplace'))}</p>
-         <form class="form"><label class="field"><span>${esc(t('keyField'))}</span><input class="input" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
-         <button class="btn wide">${esc(t('save'))}</button></form>`,
-        { title: t('keyEnter') }
-      );
-      $('form', s.body).onsubmit = (e) => {
-        e.preventDefault();
-        const value = $('input', s.body).value.trim().toLowerCase();
-        if (!/^[a-f0-9]{64}$/.test(value)) return toast(t('keyBad'));
-        store.set('key', value);
-        s.close();
-        rerender();
-      };
-    };
-  }
 
   function drawMenu() {
     const menu = $('.menu', root);

@@ -21,6 +21,7 @@ function draw() {
       </form>
       <div class="pill">
         <a href="/fav" data-tab="fav" aria-label="${esc(t('fav'))}">${icon('heart')}</a>
+        <a href="/chats" data-tab="chats" aria-label="${esc(t('messages'))}">${icon('chat')}<b data-unread hidden></b></a>
         <a href="/me" data-tab="me" aria-label="${esc(t('me'))}">${icon('user')}</a>
       </div>
       <a href="/new" class="btn head-post">${icon('plus')}${esc(t('postAd'))}</a>
@@ -46,7 +47,7 @@ export const header = {
     const params = new URLSearchParams(location.search);
     const city = onSearch() && params.has('city') ? params.get('city') : store.get('city', '');
     // Выбранный город виден только в фильтрах, поэтому он тоже входит в счётчик на кнопке.
-    const count = (city ? 1 : 0) + (onSearch() ? ['min', 'max', 'cond', 'type'].filter((k) => params.get(k)).length : 0);
+    const count = (city ? 1 : 0) + (onSearch() ? ['area', 'min', 'max', 'cond', 'type'].filter((k) => params.get(k)).length : 0);
     const badge = $('.filter-btn b', root());
     badge.textContent = count;
     badge.hidden = !count;

@@ -2,7 +2,9 @@ import { ensureSchema } from './schema.js';
 import { HttpError, fail, json, limit, randomHex, safeEqual, sha256 } from './util.js';
 import * as listings from './listings.js';
 import { servePhoto, uploadPhoto } from './photos.js';
-import { botInfo, pollLogin, startLogin, webhook } from './telegram.js';
+import { register, requireUser, signIn, signOut } from './auth.js';
+import * as chat from './chat.js';
+import * as reviews from './reviews.js';
 import { draftFromPhoto } from './ai.js';
 import { CITIES } from '../public/js/catalog.js';
 
@@ -15,14 +17,14 @@ async function ipHash(request, env) {
   return 'ip:' + (await sha256(salt + (request.headers.get('cf-connecting-ip') || 'local'))).slice(0, 32);
 }
 
-// Кто делает запрос: сессия Telegram или ключ устройства из браузера.
+// Кто делает запрос: вошедший пользователь или ключ устройства из браузера.
 async function identify(request, env) {
   const token = /^Bearer ([a-f0-9]{64})$/.exec(request.headers.get('authorization') || '')?.[1];
   const ip = await ipHash(request, env);
   if (!token) return { ip, owner: null, user: null };
   const hash = await sha256(token);
   const user = await env.DB.prepare(
-    'SELECT u.id, u.name, u.username FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.hash = ?'
+    'SELECT u.id, u.name, u.login FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.hash = ? AND u.login IS NOT NULL'
   )
     .bind(hash)
     .first();
@@ -35,18 +37,25 @@ async function api(request, env, ctx, url) {
   const who = await identify(request, env);
   let m;
 
-  if (method === 'GET' && path === '/config') {
-    const bot = await botInfo(env, url.origin);
-    return json({ telegram: Boolean(env.BOT_TOKEN), bot: bot?.username || null, ai: Boolean(env.AI) });
-  }
+  if (method === 'GET' && path === '/config') return json({ ai: Boolean(env.AI) });
   if (method === 'GET' && path === '/me') {
-    return json({ user: who.user ? { name: who.user.name, username: who.user.username } : null });
+    return json({ user: who.user ? { name: who.user.name, login: who.user.login } : null });
   }
-  if (method === 'POST' && path === '/auth/start') return startLogin(env, url.origin, who);
-  if (method === 'GET' && path === '/auth/poll') return pollLogin(request, env);
-  if (method === 'POST' && path === '/auth/logout') {
-    if (who.user) await env.DB.prepare('DELETE FROM sessions WHERE hash = ?').bind(who.hash).run();
-    return json({ ok: true });
+  if (method === 'POST' && path === '/auth/register') return register(request, env, who);
+  if (method === 'POST' && path === '/auth/login') return signIn(request, env, who);
+  if (method === 'POST' && path === '/auth/logout') return signOut(env, who);
+
+  if (method === 'GET' && path === '/chats') return chat.listChats(env, who);
+  if (method === 'GET' && path === '/chats/unread') return chat.unread(env, who);
+  if ((m = /^\/chats\/(\d{1,12})(\/review)?$/.exec(path))) {
+    const id = Number(m[1]);
+    if (m[2]) {
+      if (method === 'POST') return reviews.saveReview(request, env, { chat: id }, who);
+      if (method === 'DELETE') return reviews.deleteReview(env, { chat: id }, who);
+    } else {
+      if (method === 'GET') return chat.getChat(env, url, id, who);
+      if (method === 'POST') return chat.sendMessage(request, env, id, who);
+    }
   }
 
   if (method === 'POST' && path === '/ai/draft') return draftFromPhoto(request, env, url, who);
@@ -55,14 +64,17 @@ async function api(request, env, ctx, url) {
     if (method === 'GET') return listings.listListings(env, url);
     if (method === 'POST') return listings.createListing(request, env, ctx, who);
   }
-  if ((m = /^\/listings\/(\d{1,12})(\/contact|\/report|\/status|\/seller)?$/.exec(path))) {
+  if ((m = /^\/listings\/(\d{1,12})(\/contact|\/report|\/status|\/seller|\/chat|\/review)?$/.exec(path))) {
     const id = Number(m[1]);
     if (!m[2]) {
       if (method === 'GET') return listings.getListing(env, ctx, id, who);
       if (method === 'PUT') return listings.updateListing(request, env, id, who);
       if (method === 'DELETE') return listings.deleteListing(env, id, who);
     }
-    if (method === 'GET' && m[2] === '/seller') return listings.sellerPage(env, id);
+    if (method === 'GET' && m[2] === '/seller') return listings.sellerPage(env, id, who);
+    if (method === 'POST' && m[2] === '/chat') return chat.startChat(request, env, id, who);
+    if (method === 'POST' && m[2] === '/review') return reviews.saveReview(request, env, { listing: id }, who);
+    if (method === 'DELETE' && m[2] === '/review') return reviews.deleteReview(env, { listing: id }, who);
     if (method === 'POST' && m[2] === '/contact') return listings.getContact(env, id, who);
     if (method === 'POST' && m[2] === '/report') return listings.reportListing(request, env, id, who);
     if (method === 'POST' && m[2] === '/status') return listings.setStatus(request, env, id, who);
@@ -70,8 +82,7 @@ async function api(request, env, ctx, url) {
   if (method === 'GET' && path === '/mine') return listings.listMine(env, who);
   if (method === 'GET' && (m = /^\/mine\/(\d{1,12})$/.exec(path))) return listings.getMine(env, Number(m[1]), who);
   if (method === 'POST' && path === '/photos') {
-    if (!who.owner) fail(401, 'no_key');
-    if (env.BOT_TOKEN && !who.user) fail(401, 'login_required');
+    await requireUser(env, who);
     return uploadPhoto(request, env, who);
   }
 
@@ -87,6 +98,10 @@ async function api(request, env, ctx, url) {
       fail(403, 'forbidden');
     }
     if (method === 'GET' && path === '/admin/reports') return listings.adminReports(env);
+    if (method === 'GET' && path === '/admin/reviews') return reviews.adminReviews(env);
+    if (method === 'DELETE' && (m = /^\/admin\/reviews\/(\d{1,12})$/.exec(path))) {
+      return reviews.adminDeleteReview(env, Number(m[1]));
+    }
     if (method === 'POST' && (m = /^\/admin\/(\d{1,12})$/.exec(path))) {
       return listings.adminAction(request, env, Number(m[1]));
     }
@@ -137,10 +152,6 @@ export default {
       if (request.method === 'GET' && (m = /^\/p\/([a-f0-9]{24})(\/t)?$/.exec(path))) {
         await ensureSchema(env);
         return await servePhoto(request, env, ctx, m[1], m[2] ? 'thumb' : 'full');
-      }
-      if (request.method === 'POST' && path === '/tg/webhook') {
-        await ensureSchema(env);
-        return await webhook(request, env, url.origin);
       }
       if (request.method === 'GET' && (m = /^\/item\/(\d{1,12})$/.exec(path))) {
         await ensureSchema(env);

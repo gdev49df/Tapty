@@ -1,16 +1,16 @@
-import { api, config, currentUser } from '../api.js';
+import { api, config, currentUser, dropSession } from '../api.js';
+import { authForm } from '../auth.js';
 import { CATEGORIES, CITIES, CONDITIONS, LIMITS, PRICE_TYPES, normalizePhone } from '../catalog.js';
 import { icon } from '../icons.js';
 import { label, lang, t } from '../i18n.js';
 import { compress, forAi } from '../images.js';
-import { loginBlock } from '../login.js';
 import { store } from '../store.js';
-import { $, $$, emptyState, errorText, esc, phoneText, toast } from '../ui.js';
+import { $, $$, areaOptions, emptyState, errorText, esc, phoneText, toast } from '../ui.js';
 
 const digits = (v) => String(v ?? '').replace(/\D/g, '');
 const spaced = (v) => digits(v).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 
-export default async function post({ root, params, alive, go, back, rerender, onLeave }) {
+export default async function post({ root, params, alive, go, back, rerender }) {
   const editId = params[0] ? Number(params[0]) : null;
   const title = t(editId ? 'editTitle' : 'newTitle');
   const head = `<div class="page-head"><button class="icon-btn" data-back aria-label="${esc(t('back'))}">${icon('back')}</button><h1>${esc(title)}</h1></div>`;
@@ -18,14 +18,16 @@ export default async function post({ root, params, alive, go, back, rerender, on
   $('[data-back]', root).onclick = back;
 
   let values;
+  let user;
   let aiOn = false;
   try {
-    const [cfg, user] = await Promise.all([config(), currentUser()]);
+    const [cfg, me] = await Promise.all([config(), currentUser()]);
     if (!alive()) return;
     aiOn = cfg.ai;
-    if (!editId && cfg.telegram && !user) {
+    user = me;
+    if (!user) {
       root.insertAdjacentHTML('beforeend', '<div class="narrow login-slot"></div>');
-      loginBlock($('.login-slot', root), { onDone: rerender, onLeave });
+      authForm($('.login-slot', root), { note: t('authPost'), onDone: rerender });
       return;
     }
     if (editId) values = (await api(`/mine/${editId}`)).item;
@@ -40,7 +42,7 @@ export default async function post({ root, params, alive, go, back, rerender, on
   const draft = editId ? null : store.get('draft');
   values ??= {
     title: '', description: '', category: '', condition: '', priceType: 'fixed', price: '',
-    city: store.get('city', ''), district: '', name: '', phone: '', whatsapp: true, telegram: '', photos: [],
+    city: store.get('city', ''), area: '', district: '', name: user.name, phone: '', whatsapp: true, telegram: '', photos: [],
     ...seller, ...draft,
   };
   const photos = values.photos.map((id) => ({ id, preview: `/p/${id}/t` }));
@@ -81,7 +83,8 @@ export default async function post({ root, params, alive, go, back, rerender, on
         <input class="input big" name="price" inputmode="numeric" value="${esc(values.price ? spaced(values.price) : '')}" maxlength="15"><em></em></label>
       <h2 class="form-title">${esc(t('sContacts'))}</h2>
       ${select('city', CITIES, t('city'))}
-      ${text('district', t('fDistrict'), `maxlength="${LIMITS.districtMax}"`)}
+      <label class="field" data-field="area"><span>${esc(t('fArea'))}</span><select class="input" name="area"></select><em></em></label>
+      ${text('district', t('fStreet'), `maxlength="${LIMITS.districtMax}"`)}
       ${text('name', t('fName'), `maxlength="${LIMITS.nameMax}" autocomplete="name"`)}
       ${text('phone', t('fPhone'), 'type="tel" inputmode="tel" autocomplete="tel" maxlength="18"', '+7 701 123 45 67')}
       <label class="check"><input type="checkbox" name="whatsapp"${values.whatsapp ? ' checked' : ''}><span>${esc(t('fWhatsapp'))}</span></label>
@@ -101,6 +104,20 @@ export default async function post({ root, params, alive, go, back, rerender, on
   prettyPhone();
   phoneInput.addEventListener('blur', prettyPhone);
 
+  // Список районов зависит от города; у большинства городов его нет.
+  let areaCity = null;
+  const drawAreas = (selected) => {
+    const city = form.elements.city.value;
+    if (city === areaCity) return;
+    areaCity = city;
+    const list = areaOptions(city);
+    form.elements.area.innerHTML = [{ value: '', label: t('noArea') }, ...list]
+      .map((o) => `<option value="${o.value}"${o.value === selected ? ' selected' : ''}>${esc(o.label)}</option>`)
+      .join('');
+    $('[data-field="area"]', form).hidden = !list.length;
+  };
+  drawAreas(values.area);
+
   const read = () => {
     const f = form.elements;
     return {
@@ -111,6 +128,7 @@ export default async function post({ root, params, alive, go, back, rerender, on
       priceType: f.priceType.value,
       price: Number(digits(f.price.value)),
       city: f.city.value,
+      area: f.area.value,
       district: f.district.value.trim(),
       name: f.name.value.trim(),
       phone: f.phone.value.trim(),
@@ -122,6 +140,7 @@ export default async function post({ root, params, alive, go, back, rerender, on
   const saveDraft = () => !editId && alive() && store.set('draft', read());
 
   const sync = () => {
+    drawAreas('');
     const category = CATEGORIES.find((c) => c.id === form.elements.category.value);
     $('[data-field="condition"]', form).hidden = category ? !category.goods : false;
     $('[data-field="price"]', form).hidden = form.elements.priceType.value === 'free';
@@ -281,7 +300,7 @@ export default async function post({ root, params, alive, go, back, rerender, on
     button.textContent = t('publishing');
     try {
       const { id } = await api(editId ? `/listings/${editId}` : '/listings', { method: editId ? 'PUT' : 'POST', body: data });
-      store.set('seller', { name: data.name, phone: data.phone, whatsapp: data.whatsapp, telegram: data.telegram, city: data.city, district: data.district });
+      store.set('seller', { name: data.name, phone: data.phone, whatsapp: data.whatsapp, telegram: data.telegram, city: data.city, area: data.area, district: data.district });
       if (!editId) store.del('draft');
       toast(t(editId ? 'saved' : 'publishedOk'));
       go(`/item/${id}`, { replace: true });
@@ -289,7 +308,7 @@ export default async function post({ root, params, alive, go, back, rerender, on
       button.disabled = false;
       button.textContent = t(editId ? 'save' : 'publish');
       if (err.code === 'login_required') {
-        store.del('session');
+        dropSession();
         return rerender();
       }
       if (err.field && showError(err.field)) return;

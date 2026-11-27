@@ -4,13 +4,37 @@ const randomKey = () =>
   [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, '0')).join('');
 
 export const auth = {
+  // Ключ устройства: по нему узнаются объявления, поданные без аккаунта.
   deviceKey() {
     let key = store.get('key');
     if (!key) store.set('key', (key = randomKey()));
     return key;
   },
   token: () => store.get('session') || auth.deviceKey(),
+  signedIn: () => Boolean(store.get('session')),
 };
+
+// Шапка и меню узнают о входе и выходе по этому событию.
+const changed = () => dispatchEvent(new Event('tapty:auth'));
+
+export function setSession({ token }) {
+  store.set('session', token);
+  changed();
+}
+
+export function dropSession() {
+  if (!auth.signedIn()) return;
+  store.del('session');
+  changed();
+}
+
+export async function signOut() {
+  await api('/auth/logout', { method: 'POST' }).catch(() => {});
+  // Черновик и контакты принадлежат вышедшему человеку.
+  store.del('seller');
+  store.del('draft');
+  dropSession();
+}
 
 export class ApiError extends Error {
   constructor(status, code, field) {
@@ -36,6 +60,8 @@ export async function api(path, { method = 'GET', body, headers = {}, signal } =
     throw new ApiError(0, 'network');
   }
   const data = await res.json().catch(() => null);
+  // Сессия больше не действует.
+  if (data?.error === 'login_required') dropSession();
   if (!res.ok || !data) throw new ApiError(res.status, data?.error || 'server', data?.field);
   return data;
 }
@@ -49,10 +75,10 @@ export function config() {
   return configPromise;
 }
 
-// Текущий пользователь Telegram; протухшую сессию убираем.
+// Вошедший пользователь; протухшую сессию убираем.
 export async function currentUser() {
-  if (!store.get('session')) return null;
+  if (!auth.signedIn()) return null;
   const { user } = await api('/me');
-  if (!user) store.del('session');
+  if (!user) dropSession();
   return user;
 }

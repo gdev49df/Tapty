@@ -1,17 +1,19 @@
 import { api } from '../api.js';
+import { withAuth } from '../auth.js';
 import { CATEGORIES, REPORT_REASONS } from '../catalog.js';
 import { icon } from '../icons.js';
-import { adsCount, label, t, viewsCount } from '../i18n.js';
+import { adsCount, label, reviewsCount, t, viewsCount } from '../i18n.js';
 import { favorites } from '../store.js';
-import { $, $$, cardHtml, cityName, copyText, dateText, emptyState, errorText, esc, initial, money, phoneText, priceText, sheet, sinceText, toast } from '../ui.js';
+import { openViewer } from '../viewer.js';
+import { $, $$, areaName, cardHtml, cityName, copyText, dateText, emptyState, errorText, esc, initial, money, phoneText, placeText, priceText, ratingText, sheet, sinceText, stars, toast, verifiedBadge, wasCheaper } from '../ui.js';
 
 export default async function itemPage({ root, params, alive, back, go }) {
   const id = Number(params[0]);
   root.innerHTML = '<div class="item"><div class="gallery skel-block"></div></div>';
 
-  let item, seller, similar;
+  let item, seller, same, similar;
   try {
-    ({ item, seller, similar = [] } = await api(`/listings/${id}`));
+    ({ item, seller, same = [], similar = [] } = await api(`/listings/${id}`));
   } catch (e) {
     if (!alive()) return;
     const missing = e.status === 404;
@@ -27,9 +29,9 @@ export default async function itemPage({ root, params, alive, back, go }) {
 
   const on = favorites.has(id);
   const category = CATEGORIES.find((c) => c.id === item.category);
-  const place = [cityName(item.city), item.district].filter(Boolean).join(', ');
+  const place = placeText(item);
   const active = item.status === 'active';
-  const canWrite = active && !item.mine && item.whatsapp;
+  const canWrite = active && !item.mine && item.chat;
   const many = item.photos.length > 1;
   const specs = [
     [t('category'), label(category)],
@@ -39,18 +41,31 @@ export default async function itemPage({ root, params, alive, back, go }) {
   ].filter(Boolean);
   // Номера объявлений начинаются с миллиона.
   const number = 1_000_000 + id;
-  // Карта ищет место по тексту из объявления: город и то, что продавец написал про район.
-  const mapQuery = `${t('country')}, ${place}`;
+  // Карта ищет улицу или ориентир продавца, а если их нет — выбранный район.
+  const mapQuery = [t('country'), cityName(item.city), item.district || areaName(item.city, item.area)].filter(Boolean).join(', ');
+  const cheapest = same[0];
+  const sameRow = (other) => {
+    const diff = other.price - item.price;
+    return `<li><a href="/item/${other.id}">
+      <span class="my-photo">${other.photo ? `<img src="/p/${other.photo}/t" alt="" loading="lazy">` : icon('camera')}</span>
+      <span class="same-text"><strong>${esc(other.title)}</strong><small>${esc(
+        [cityName(other.city), areaName(other.city, other.area), other.condition && t(other.condition)].filter(Boolean).join(', ')
+      )}</small></span>
+      <span class="same-price"><b>${esc(money(other.price))}</b><small class="${diff < 0 ? 'cheaper' : ''}">${esc(
+        `${diff < 0 ? '−' : '+'}${money(Math.abs(diff))}`
+      )}</small></span>
+    </a></li>`;
+  };
 
   root.innerHTML = `
     <article class="item">
       <div class="col-main">
         <div class="item-media">
           <div class="gallery-wrap">
-            <div class="gallery" tabindex="0" aria-label="${esc(t('photos'))}">
+            <div class="gallery" tabindex="0" aria-label="${esc(t(item.photos.length ? 'openPhoto' : 'photos'))}">
               ${
                 item.photos.length
-                  ? item.photos.map((p, i) => `<img src="/p/${p}" alt="${esc(item.title)}, ${i + 1}" ${i ? 'loading="lazy"' : ''}>`).join('')
+                  ? item.photos.map((p, i) => `<img src="/p/${p}" data-photo="${i}" alt="${esc(item.title)}, ${i + 1}" ${i ? 'loading="lazy"' : ''}>`).join('')
                   : `<div class="no-photo">${icon('camera')}</div>`
               }
             </div>
@@ -107,7 +122,21 @@ export default async function itemPage({ root, params, alive, back, go }) {
           ${active ? '' : `<p class="status-note">${esc(t(`st_${item.status}`))}</p>`}
           <div class="price-box">
             <p class="price-tag">${esc(priceText(item))}</p>
-            ${t(item.priceType) === priceText(item) ? '' : `<span>${esc(t(item.priceType))}</span>`}
+            ${t(item.priceType) === priceText(item) ? '' : `<span class="deal">${esc(t(item.priceType))}</span>`}
+            ${
+              wasCheaper(item)
+                ? `<p class="price-was"><s><span class="sr-only">${esc(t('oldPrice'))} </span>${esc(money(item.oldPrice))}</s> ${esc(
+                    `${t('priceDrop')} ${money(item.oldPrice - item.price)}`
+                  )}</p>`
+                : ''
+            }
+            ${
+              cheapest
+                ? `<button type="button" class="price-same" data-same>${esc(
+                    cheapest.price < item.price ? `${t('sameFrom')} ${money(cheapest.price)}` : `${t('sameCompare')} (${same.length})`
+                  )}${icon('down')}</button>`
+                : ''
+            }
           </div>
           <h1>${esc(item.title)}</h1>
           <p class="meta">${icon('pin')}${esc(place)}</p>
@@ -118,13 +147,24 @@ export default async function itemPage({ root, params, alive, back, go }) {
           <section class="seller-card">
             <span class="avatar" aria-hidden="true">${initial(item.name)}</span>
             <div><h2>${esc(item.name)}</h2>
-              ${seller ? `<p>${esc(sinceText(seller.since))}</p><p>${esc(adsCount(seller.count))}</p>` : ''}</div>
+              <p>${esc(sinceText(seller.since))}</p><p>${esc(adsCount(seller.count))}</p></div>
+            ${seller.verified ? verifiedBadge() : ''}
+            <a class="rating" href="/seller/${id}">${
+              seller.reviews
+                ? `${stars(seller.rating)}<b>${esc(ratingText(seller.rating))}</b><span>${esc(reviewsCount(seller.reviews))}</span>`
+                : `<span>${esc(t('noReviews'))}</span>`
+            }</a>
             <a class="btn ghost wide" href="/seller/${id}">${esc(t('allSellerAds'))}</a>
           </section>
           ${item.mine ? '' : `<p class="safety">${icon('shield')}<span>${esc(t('safety'))}</span></p>`}
           ${item.mine ? '' : `<button class="link-btn" data-report>${icon('flag')}${esc(t('report'))}</button>`}
         </div>
       </div>
+      ${
+        same.length
+          ? `<section class="same"><h2>${esc(t('sameTitle'))}</h2><ul class="same-list">${same.map(sameRow).join('')}</ul></section>`
+          : ''
+      }
       ${
         similar.length
           ? `<section class="similar"><h2>${esc(t('similar'))}</h2><div class="grid">${similar.map(cardHtml).join('')}</div></section>`
@@ -138,15 +178,28 @@ export default async function itemPage({ root, params, alive, back, go }) {
       <div class="row">${item.status === 'hidden' ? '' : `<a class="btn" href="/edit/${id}">${icon('edit')}${esc(t('edit'))}</a>`}
       <a class="btn ghost" href="/me">${esc(t('myAds'))}</a></div>`;
   } else if (active) {
-    const canOffer = item.priceType === 'bargain';
+    const canOffer = item.priceType === 'bargain' && item.chat;
     actions.innerHTML = `<div class="row">
       ${canOffer ? `<button class="btn ghost" data-offer>${esc(t('offer'))}</button>` : ''}
       <button class="btn" data-contact>${icon('phone')}${esc(t('contact'))}</button></div>`;
   } else actions.remove();
 
   $('.g-back', root).onclick = back;
+  $('[data-same]', root)?.addEventListener('click', () =>
+    $('.same', root).scrollIntoView({ block: 'start', behavior: 'smooth' })
+  );
 
   const gallery = $('.gallery', root);
+  const view = (i) => openViewer(item.photos, i, item.title);
+  gallery.addEventListener('click', (e) => {
+    const photo = e.target.closest('[data-photo]');
+    if (photo) view(Number(photo.dataset.photo));
+  });
+  gallery.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || !item.photos.length) return;
+    e.preventDefault();
+    view(Math.round(gallery.scrollLeft / gallery.clientWidth) || 0);
+  });
   const counter = $('.counter', root);
   if (counter) {
     const thumbs = $$('[data-slide]', root);
@@ -166,8 +219,8 @@ export default async function itemPage({ root, params, alive, back, go }) {
     else copyText(data.url, t('linkCopied'));
   };
 
-  const waLink = (phone, extra = '') =>
-    `https://wa.me/${phone}?text=${encodeURIComponent(`${t('waText')}: «${item.title}»${extra}\n${location.origin}/item/${id}`)}`;
+  const waLink = (phone) =>
+    `https://wa.me/${phone}?text=${encodeURIComponent(`${t('waText')}: «${item.title}»\n${location.origin}/item/${id}`)}`;
 
   let contactCache;
   const contact = () =>
@@ -195,33 +248,41 @@ export default async function itemPage({ root, params, alive, back, go }) {
     }
   });
 
-  $('[data-offer]', root)?.addEventListener('click', async () => {
-    const s = sheet('<p class="muted">…</p>', { title: t('offer') });
-    try {
-      const c = await contact();
-      if (!c.whatsapp) {
-        s.body.innerHTML = `<p>${esc(t('offerNoWa'))}</p><a class="btn wide" href="tel:+${c.phone}">${icon('phone')}${esc(phoneText(c.phone))}</a>`;
-        return;
-      }
-      const start = Math.round((item.price * 0.9) / 100) * 100 || item.price;
-      s.body.innerHTML = `
+  // Сообщение уходит в чат на сайте, и открывается сама переписка.
+  const sendToChat = async (text) => {
+    const { chat } = await api(`/listings/${id}/chat`, { method: 'POST', body: { text } });
+    if (!alive()) return;
+    toast(t('messageSent'));
+    go(`/chat/${chat}`);
+  };
+
+  const openOffer = () => {
+    const start = Math.round((item.price * 0.9) / 100) * 100 || item.price;
+    const s = sheet(
+      `<form class="form">
         <label class="field"><span>${esc(t('offerYour'))}</span>
-          <input class="input big" inputmode="numeric" value="${start}"></label>
-        <a class="btn wide" target="_blank" rel="noopener">${icon('chat')}${esc(t('offerSend'))}</a>`;
-      const input = $('input', s.body);
-      const link = $('a', s.body);
-      const update = () => {
-        const sum = Number(input.value.replace(/\D/g, ''));
-        input.value = sum ? String(sum) : '';
-        if (sum) link.href = waLink(c.phone, `. ${t('waOffer')}: ${money(sum)}`);
-        else link.removeAttribute('href');
-      };
-      input.addEventListener('input', update);
-      update();
-    } catch (e) {
-      s.body.innerHTML = `<p>${esc(errorText(e))}</p>`;
-    }
-  });
+          <input class="input big" inputmode="numeric" maxlength="12" value="${start}"></label>
+        <button class="btn wide">${icon('send')}${esc(t('offerSend'))}</button>
+      </form>`,
+      { title: t('offer') }
+    );
+    const input = $('input', s.body);
+    input.addEventListener('input', () => (input.value = input.value.replace(/\D/g, '')));
+    $('form', s.body).onsubmit = async (e) => {
+      e.preventDefault();
+      const sum = Number(input.value);
+      if (!sum) return input.focus();
+      const button = $('button.btn', s.body);
+      button.disabled = true;
+      try {
+        await withAuth(t('authChat'), () => sendToChat(`${t('offerText')} ${money(sum)}`));
+      } catch (err) {
+        button.disabled = false;
+        toast(errorText(err));
+      }
+    };
+  };
+  $('[data-offer]', root)?.addEventListener('click', () => withAuth(t('authChat'), openOffer));
 
   const write = $('.write', root);
   if (write) {
@@ -242,9 +303,7 @@ export default async function itemPage({ root, params, alive, back, go }) {
       }
       send.disabled = true;
       try {
-        const c = await contact();
-        // Переход в той же вкладке: всплывающее окно после ожидания браузер заблокировал бы.
-        location.assign(waLink(c.phone, `\n${text}`));
+        await withAuth(t('authChat'), () => sendToChat(text));
       } catch (e) {
         toast(errorText(e));
       }

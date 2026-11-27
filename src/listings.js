@@ -1,12 +1,16 @@
 import {
-  CATEGORIES, CITIES, CONDITIONS, LIMITS, PRICE_TYPES, REPORT_REASONS, normalizePhone,
+  AREAS, CATEGORIES, CITIES, CONDITIONS, LIMITS, PRICE_TYPES, REPORT_REASONS, normalizePhone,
 } from '../public/js/catalog.js';
 import { DAY, fail, json, limit, hit, normalizeText, now, readJson } from './util.js';
 import { deleteOrphans, deletePhotos } from './photos.js';
+import { requireUser } from './auth.js';
+import { rating, sellerReviews } from './reviews.js';
+import { needles, sameProduct, signature } from './same.js';
 
 const PAGE = 20;
 const HIDE_AFTER_REPORTS = 5;
-const CARD = 'id, title, price, price_type, city, district, condition, photos, bumped_at';
+const CARD = 'id, title, price, price_type, city, area, district, condition, photos, bumped_at, old_price';
+const priced = (type) => type === 'fixed' || type === 'bargain';
 
 const parsePhotos = (row) => {
   try {
@@ -21,7 +25,9 @@ const card = (row) => ({
   title: row.title,
   price: row.price,
   priceType: row.price_type,
+  oldPrice: row.old_price,
   city: row.city,
+  area: row.area,
   district: row.district,
   condition: row.condition,
   bumpedAt: row.bumped_at,
@@ -73,6 +79,7 @@ export async function listListings(env, url) {
   };
   if (CATEGORIES.some((c) => c.id === p.get('cat'))) add('category = ?', p.get('cat'));
   if (CITIES.some((c) => c.id === p.get('city'))) add('city = ?', p.get('city'));
+  if (Object.values(AREAS).flat().some((a) => a.id === p.get('area'))) add('area = ?', p.get('area'));
   if (CONDITIONS.includes(p.get('cond'))) add('condition = ?', p.get('cond'));
   if (PRICE_TYPES.includes(p.get('type'))) add('price_type = ?', p.get('type'));
   for (const [key, sql] of [['min', 'price >= ?'], ['max', 'price <= ?']]) {
@@ -104,38 +111,60 @@ export async function listListings(env, url) {
 
 const LIVE = "status = 'active' AND expires_at > ?";
 
-// Сколько у продавца активных объявлений и с какого момента он на tapty.
+// Сколько у продавца активных объявлений, с какого момента он на tapty и что о нём пишут.
 async function sellerInfo(env, owner) {
-  const row = await env.DB.prepare(
-    `SELECT MIN(created_at) AS since, SUM(${LIVE}) AS count FROM listings WHERE owner = ?`
+  const [row, marks] = await Promise.all([
+    env.DB.prepare(`SELECT MIN(created_at) AS since, SUM(${LIVE}) AS count FROM listings WHERE owner = ?`).bind(now(), owner).first(),
+    rating(env, owner),
+  ]);
+  return { since: row.since, count: row.count || 0, ...marks };
+}
+
+// Тот же товар у других продавцов, от дешёвых к дорогим.
+async function sameItems(env, row) {
+  if (!priced(row.price_type)) return [];
+  const sig = signature(row.title);
+  const find = needles(sig);
+  if (!find.length) return [];
+  const { results } = await env.DB.prepare(
+    `SELECT ${CARD} FROM listings WHERE ${LIVE} AND category = ? AND id != ? AND owner != ?
+       AND price_type IN ('fixed', 'bargain') AND price BETWEEN ? AND ?
+       AND (${find.map(() => 'instr(search, ?) > 0').join(' OR ')})
+     ORDER BY bumped_at DESC LIMIT 200`
   )
-    .bind(now(), owner)
-    .first();
-  return { since: row.since, count: row.count || 0 };
+    // цена, отличающаяся в разы, почти всегда значит другой товар
+    .bind(now(), row.category, row.id, row.owner, Math.ceil(row.price / 3), row.price * 3, ...find)
+    .all();
+  return results
+    .filter((r) => r.price !== row.price && sameProduct(sig, signature(r.title)))
+    .sort((a, b) => a.price - b.price || b.bumped_at - a.bumped_at)
+    .slice(0, 6)
+    .map(card);
 }
 
 // Та же категория; сначала из того же города.
-async function similar(env, row) {
+async function similar(env, row, skip) {
   const { results } = await env.DB.prepare(
     `SELECT ${CARD} FROM listings WHERE ${LIVE} AND category = ? AND id != ?
-     ORDER BY city = ? DESC, bumped_at DESC LIMIT 10`
+     ORDER BY city = ? DESC, bumped_at DESC LIMIT 16`
   )
     .bind(now(), row.category, row.id, row.city)
     .all();
-  return results.map(card);
+  return results.filter((r) => !skip.has(r.id)).slice(0, 10).map(card);
 }
 
-// Все объявления продавца. Открывается по любому его объявлению, чтобы не раскрывать, кто владелец.
-export async function sellerPage(env, id) {
+// Все объявления продавца и отзывы о нём. Открывается по любому его объявлению, чтобы не раскрывать, кто владелец.
+export async function sellerPage(env, id, { owner }) {
   const row = await findRow(env, id);
   if (row.status === 'hidden') fail(404, 'not_found');
-  const [info, { results }] = await Promise.all([
+  const [info, { results }, reviews] = await Promise.all([
     sellerInfo(env, row.owner),
     env.DB.prepare(`SELECT ${CARD} FROM listings WHERE ${LIVE} AND owner = ? ORDER BY bumped_at DESC, id DESC LIMIT 100`)
       .bind(now(), row.owner)
       .all(),
+    sellerReviews(env, row.owner, owner),
   ]);
-  return json({ seller: { name: row.name, ...info }, items: results.map(card) });
+  return json({ seller: { name: row.name, ...info }, items: results.map(card), reviews });
 }
 
 async function findRow(env, id) {
@@ -161,9 +190,10 @@ export async function getListing(env, ctx, id, { owner, ip }) {
       )
     );
   }
-  const [seller, more] = await Promise.all([sellerInfo(env, row.owner), similar(env, row)]);
-  // Сам номер отдаётся только по нажатию «Связаться», здесь — лишь способы связи.
-  return json({ item: { ...detail(row), mine, whatsapp: Boolean(row.whatsapp) }, seller, similar: more });
+  const [seller, same] = await Promise.all([sellerInfo(env, row.owner), sameItems(env, row)]);
+  const more = await similar(env, row, new Set(same.map((i) => i.id)));
+  // Сам номер отдаётся только по нажатию «Связаться». Написать в чат можно только продавцу с аккаунтом.
+  return json({ item: { ...detail(row), mine, chat: row.owner.startsWith('u:') }, seller, same, similar: more });
 }
 
 export async function getContact(env, id, { ip }) {
@@ -223,6 +253,8 @@ function validate(body) {
     condition: goods ? oneOf('condition', CONDITIONS) : null,
     category,
     city: oneOf('city', CITIES.map((c) => c.id)),
+    // Район из списка есть только у некоторых городов.
+    area: body.area ? oneOf('area', (AREAS[body.city] || []).map((a) => a.id)) : '',
     district: str('district', LIMITS.districtMax),
     name: str('name', LIMITS.nameMax, 2),
     phone,
@@ -261,8 +293,7 @@ const attach = (env, ids, listingId) =>
 
 export async function createListing(request, env, ctx, who) {
   const data = validate(await readJson(request));
-  if (!who.owner) fail(401, 'no_key');
-  if (env.BOT_TOKEN && !who.user) fail(401, 'login_required');
+  await requireUser(env, who);
   await checkSeller(env, who.owner, data.phone, 0);
   await checkPhotos(env, data.photos, who.owner, 0);
   await limit(env, `new:${who.owner}`, 10, 3600);
@@ -281,7 +312,15 @@ export async function createListing(request, env, ctx, who) {
   return json({ id }, 201);
 }
 
+// Если цену снизили, прежняя показывается зачёркнутой. Подняли — зачёркнутая пропадает.
+function previousPrice(old, data) {
+  if (!priced(old.price_type) || !priced(data.price_type) || data.price > old.price) return 0;
+  const was = data.price < old.price ? old.old_price || old.price : old.old_price;
+  return was > data.price ? was : 0;
+}
+
 export async function updateListing(request, env, id, who) {
+  await requireUser(env, who);
   const old = await findOwn(env, id, who.owner);
   if (old.status === 'hidden') fail(403, 'hidden');
   const data = validate(await readJson(request));
@@ -289,7 +328,7 @@ export async function updateListing(request, env, id, who) {
   await checkPhotos(env, data.photos, who.owner, id);
   await limit(env, `edit:${who.owner}`, 60, 3600);
 
-  const row = { ...data, photos: JSON.stringify(data.photos), approved: 0 };
+  const row = { ...data, photos: JSON.stringify(data.photos), approved: 0, old_price: previousPrice(old, data) };
   const keys = Object.keys(row);
   await env.DB.prepare(`UPDATE listings SET ${keys.map((k) => `${k} = ?`).join(',')} WHERE id = ?`)
     .bind(...keys.map((k) => row[k]), id)
@@ -393,7 +432,6 @@ async function cleanup(env) {
   await deleteOrphans(env);
   await env.DB.batch([
     env.DB.prepare('DELETE FROM rate WHERE reset_at < ?').bind(t),
-    env.DB.prepare('DELETE FROM logins WHERE created_at < ?').bind(t - 3600),
   ]);
   const { results } = await env.DB.prepare(
     "SELECT * FROM listings WHERE status != 'hidden' AND expires_at < CASE status WHEN 'sold' THEN ? ELSE ? END LIMIT 5"

@@ -1,7 +1,7 @@
 import { icon } from './icons.js';
 import { lang, label, t } from './i18n.js';
 import { favorites } from './store.js';
-import { CITIES } from './catalog.js';
+import { AREAS, CITIES } from './catalog.js';
 
 export const $ = (selector, root = document) => root.querySelector(selector);
 export const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -18,6 +18,22 @@ export function priceText(item) {
 }
 
 export const cityName = (id) => label(CITIES.find((c) => c.id === id));
+export const areaName = (city, id) => label(AREAS[city]?.find((a) => a.id === id));
+export const placeText = (item) => [cityName(item.city), areaName(item.city, item.area), item.district].filter(Boolean).join(', ');
+export const areaOptions = (city) => (AREAS[city] || []).map((a) => ({ value: a.id, label: label(a) }));
+
+// Прежняя цена показывается, только если она и правда выше нынешней.
+export const wasCheaper = (item) => item.oldPrice > item.price && ['fixed', 'bargain'].includes(item.priceType);
+
+export const ratingText = (n) => String(n.toFixed(1)).replace('.', ',');
+
+export const verifiedBadge = () => `<span class="verified">${icon('verified')}${esc(t('verified'))}</span>`;
+
+// Пять звёзд, из которых закрашено столько, сколько поставили.
+export const stars = (n) =>
+  `<span class="stars" role="img" aria-label="${n} / 5">${[1, 2, 3, 4, 5]
+    .map((i) => icon('star', i <= Math.round(n) ? 'on' : ''))
+    .join('')}</span>`;
 
 const MONTHS = {
   ru: ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'],
@@ -33,6 +49,8 @@ export function dateText(seconds) {
   const year = date.getFullYear() === new Date().getFullYear() ? '' : ` ${date.getFullYear()}`;
   return `${date.getDate()} ${MONTHS[lang()][date.getMonth()]}${year}`;
 }
+
+export const timeText = (seconds) => new Date(seconds * 1000).toTimeString().slice(0, 5);
 
 const KK_FROM = ['қаңтардан', 'ақпаннан', 'наурыздан', 'сәуірден', 'мамырдан', 'маусымнан', 'шілдеден', 'тамыздан', 'қыркүйектен', 'қазаннан', 'қарашадан', 'желтоқсаннан'];
 
@@ -142,7 +160,7 @@ export const cityOptions = () =>
 
 export function cardHtml(item) {
   const on = favorites.has(item.id);
-  const place = [cityName(item.city), item.district].filter(Boolean).join(', ');
+  const place = placeText(item);
   return `
     <article class="card">
       <span class="card-photo">${
@@ -154,7 +172,9 @@ export function cardHtml(item) {
         <h3><a href="/item/${item.id}">${esc(item.title)}</a></h3>
         <button class="heart" data-fav="${item.id}" aria-pressed="${on}" aria-label="${esc(t(on ? 'fromFav' : 'toFav'))}">${icon('heart')}</button>
       </div>
-      <p class="card-price">${esc(priceText(item))}</p>
+      <p class="card-price">${esc(priceText(item))}${
+        wasCheaper(item) ? ` <s><span class="sr-only">${esc(t('oldPrice'))} </span>${esc(money(item.oldPrice))}</s>` : ''
+      }</p>
       <p class="card-meta card-date">${icon('clock')}<span>${esc(dateText(item.bumpedAt))}</span></p>
       <p class="card-meta card-place">${icon('pin')}<span>${esc(place)}</span></p>
       ${item.condition ? `<p class="card-cond">${esc(t('state'))}: ${esc(t(item.condition))}</p>` : ''}

@@ -10,6 +10,10 @@ import post from './pages/post.js';
 import fav from './pages/fav.js';
 import me from './pages/me.js';
 import rules from './pages/rules.js';
+import chats from './pages/chats.js';
+import chatPage from './pages/chat.js';
+import { closeViewer } from './viewer.js';
+import { paintUnread, refreshUnread } from './unread.js';
 import seller from './pages/seller.js';
 import { footer } from './footer.js';
 import admin from './pages/admin.js';
@@ -22,6 +26,8 @@ const ROUTES = [
   [/^\/item\/(\d+)$/, item, ''],
   [/^\/seller\/(\d+)$/, seller, ''],
   [/^\/fav$/, fav, 'fav'],
+  [/^\/chats$/, chats, 'chats'],
+  [/^\/chat\/(\d+)$/, chatPage, 'chats'],
   [/^\/me$/, me, 'me'],
   [/^\/rules$/, rules, 'me'],
   [/^\/admin$/, admin, ''],
@@ -52,15 +58,19 @@ function chrome(tab) {
     ['home', '/', 'grid', t('catalog')],
     ['fav', '/fav', 'heart', t('fav')],
     ['new', '/new', 'plus', t('post')],
+    ['chats', '/chats', 'chat', t('chats')],
     ['me', '/me', 'user', t('me')],
   ];
   $('#tabs').innerHTML = tabs
     .map(
       ([id, href, ic, name]) =>
-        `<a href="${href}" class="tab tab-${id}"${id === tab ? ' aria-current="page"' : ''}><span>${icon(ic)}</span>${esc(name)}</a>`
+        `<a href="${href}" class="tab tab-${id}"${id === tab ? ' aria-current="page"' : ''}><span>${icon(ic)}${
+          id === 'chats' ? '<b data-unread hidden></b>' : ''
+        }</span>${esc(name)}</a>`
     )
     .join('');
   header.update(tab);
+  paintUnread();
 }
 
 async function render({ restored = false } = {}) {
@@ -68,6 +78,7 @@ async function render({ restored = false } = {}) {
   cleanups.forEach((fn) => fn());
   cleanups = [];
   closeSheet();
+  closeViewer();
 
   const path = location.pathname.replace(/(.)\/$/, '$1');
   const route = ROUTES.find(([re]) => re.test(path));
@@ -77,10 +88,10 @@ async function render({ restored = false } = {}) {
 
   document.documentElement.lang = lang();
   document.title = 'tapty. — объявления по Казахстану';
-  document.body.dataset.page = isItem ? 'item' : path === '/' ? 'home' : path === '/search' ? 'search' : '';
+  document.body.dataset.page = isItem ? 'item' : page === chatPage ? 'chat' : path === '/' ? 'home' : path === '/search' ? 'search' : '';
   chrome(tab);
   // В форме, профиле и модерации подвал только мешает.
-  footer.update(![post, me, admin].includes(page));
+  footer.update(![post, me, chats, chatPage, admin].includes(page));
 
   view.innerHTML = '';
   const restore = scroll.get(key) ?? 0;
@@ -118,6 +129,8 @@ header.init({ go });
 history.scrollRestoration = 'manual';
 history.replaceState({ key, depth }, '');
 addEventListener('popstate', (e) => {
+  // «Назад» при открытом фото только закрывает его: страница под ним остаётся как была.
+  if (closeViewer()) return;
   scroll.set(key, window.scrollY);
   key = e.state?.key ?? 0;
   depth = e.state?.depth ?? 0;
@@ -134,3 +147,4 @@ addEventListener('beforeinstallprompt', (e) => {
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 
 render();
+refreshUnread();

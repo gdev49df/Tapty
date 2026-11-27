@@ -13,9 +13,45 @@ export default function admin({ root, alive }) {
         <button class="btn wide">Показать жалобы</button>
       </form>
       <div class="queue"></div>
+      <div class="review-queue"></div>
     </div>`;
   const queue = $('.queue', root);
   const headers = () => ({ 'x-admin-key': encodeURIComponent(adminKey) });
+  const reviewBox = $('.review-queue', root);
+
+  async function loadReviews() {
+    const { items } = await api('/admin/reviews', { headers: headers() });
+    if (!alive()) return;
+    reviewBox.innerHTML = `<h2>Последние отзывы</h2>${
+      items.length
+        ? items
+            .map(
+              (r) => `<article class="my">
+                <p><strong>${esc(r.author)}</strong> о продавце <strong>${esc(r.seller)}</strong>, оценка ${r.rating} из 5</p>
+                <p class="desc">${esc(r.text)}</p>
+                <div class="my-actions"><button class="btn small ghost" data-review="${r.id}">Удалить отзыв</button></div>
+              </article>`
+            )
+            .join('')
+        : '<p class="muted">Отзывов нет.</p>'
+    }`;
+  }
+
+  reviewBox.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-review]');
+    if (!btn) return;
+    if (!btn.dataset.sure) {
+      btn.dataset.sure = '1';
+      btn.textContent = 'Точно?';
+      return;
+    }
+    try {
+      await api(`/admin/reviews/${btn.dataset.review}`, { method: 'DELETE', headers: headers() });
+      await loadReviews();
+    } catch (err) {
+      toast(errorText(err));
+    }
+  });
 
   async function load() {
     try {
@@ -43,6 +79,7 @@ export default function admin({ root, alive }) {
             )
             .join('')
         : '<p class="muted">Жалоб нет.</p>';
+      await loadReviews();
     } catch (e) {
       toast(e.code === 'forbidden' ? 'Неверный ключ' : e.status === 404 ? 'Сначала задайте секрет ADMIN_KEY' : errorText(e));
     }

@@ -105,7 +105,7 @@ const remember = (env, text) =>
 export async function draftFromPhoto(request, env, url, who) {
   if (!env.AI) fail(404, 'not_found');
   if (!who.owner) fail(401, 'no_key');
-  if (env.BOT_TOKEN && !who.user) fail(401, 'login_required');
+  if (!who.user) fail(401, 'login_required');
 
   if (Number(request.headers.get('content-length')) > MAX_BYTES) fail(413, 'photo_too_large');
   const image = new Uint8Array(await request.arrayBuffer());
