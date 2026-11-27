@@ -3,7 +3,7 @@ import { CATEGORIES, CONDITIONS, PRICE_TYPES } from '../catalog.js';
 import { icon } from '../icons.js';
 import { label, t } from '../i18n.js';
 import { store } from '../store.js';
-import { $, emptyState, esc, feed, pick, sheet } from '../ui.js';
+import { $, cityOptions, emptyState, esc, feed, pick, sheet } from '../ui.js';
 
 const KEYS = ['q', 'cat', 'city', 'min', 'max', 'cond', 'type', 'sort'];
 
@@ -96,6 +96,13 @@ export default function search({ root, query, alive, onLeave, go, restored }) {
     apply();
   });
 
+  // Выбранный город запоминается: по нему же показывается лента на главной.
+  function setCity(value) {
+    if (value === filters.city) return;
+    filters.city = value;
+    store.set('city', value);
+  }
+
   function openFilters() {
     const radios = (name, values) =>
       [['', t('any')], ...values.map((v) => [v, t(v)])]
@@ -103,6 +110,11 @@ export default function search({ root, query, alive, onLeave, go, restored }) {
         .join('');
     const s = sheet(
       `<form class="form">
+        <label class="field"><span>${esc(t('city'))}</span>
+          <select class="input" name="city">${[{ value: '', label: t('allKz') }, ...cityOptions()]
+            .map((o) => `<option value="${o.value}"${filters.city === o.value ? ' selected' : ''}>${esc(o.label)}</option>`)
+            .join('')}</select>
+        </label>
         <fieldset><legend>${esc(t('price'))}, ₸</legend>
           <div class="row">
             <input class="input" name="min" inputmode="numeric" placeholder="${esc(t('priceFrom'))}" aria-label="${esc(t('priceFrom'))}" value="${esc(filters.min)}">
@@ -124,10 +136,12 @@ export default function search({ root, query, alive, onLeave, go, restored }) {
       const data = new FormData(form);
       for (const k of ['min', 'max']) filters[k] = String(data.get(k) || '').replace(/\D/g, '');
       for (const k of ['cond', 'type']) filters[k] = String(data.get(k) || '');
+      setCity(String(data.get('city') || ''));
       apply();
     };
     $('[data-reset]', form).onclick = () => {
       filters.min = filters.max = filters.cond = filters.type = '';
+      setCity('');
       apply();
     };
   }

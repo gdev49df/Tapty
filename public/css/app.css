@@ -76,13 +76,9 @@ body[data-page='item'] #tabs { display: none; }
 #topbar { display: none; }
 body[data-page='home'] #topbar, body[data-page='search'] #topbar { display: block; }
 body[data-page='home'] #view, body[data-page='search'] #view { padding-top: 0; }
-.head { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: 'logo city' 'search search'; align-items: center; gap: 12px; padding: calc(12px + var(--safe-t)) 16px 16px; border-bottom: 1px solid var(--line); }
-.head > .logo { grid-area: logo; font-size: 28px; }
-.city-btn { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-weight: 500; }
-.city-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.city-btn .i { width: 16px; height: 16px; color: var(--muted); }
-.city-btn.in-head { grid-area: city; justify-self: end; max-width: 100%; height: 44px; padding: 0 16px; background: var(--surface); border-radius: var(--r); }
-.city-btn.in-search, .head .pill, .head .head-post { display: none; }
+.head { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-areas: 'logo' 'search'; align-items: center; gap: 12px; padding: calc(12px + var(--safe-t)) 16px 16px; border-bottom: 1px solid var(--line); }
+.head > .logo { grid-area: logo; justify-self: start; font-size: 28px; }
+.head .pill, .head .head-post { display: none; }
 .searchbar { grid-area: search; display: flex; align-items: center; gap: 12px; height: 52px; padding: 0 4px 0 16px; background: var(--surface); border: 1px solid transparent; border-radius: var(--r-l); color: var(--muted); }
 .searchbar:focus-within { border-color: var(--accent); }
 .searchbar input { flex: 1; min-width: 0; height: 100%; background: none; border: 0; outline: 0; color: var(--text); font-size: 16px; }
@@ -357,8 +353,6 @@ body[data-page='item'] #toast { bottom: calc(var(--safe-b) + 96px); }
   #topbar, body[data-page] #topbar { display: block; position: sticky; top: 0; z-index: 20; background: var(--bg); border-bottom: 1px solid var(--line); }
   .head { display: flex; gap: 16px; max-width: 1272px; margin: 0 auto; padding: 16px 20px; border: 0; }
   .searchbar { flex: 1; min-width: 0; height: 52px; }
-  .city-btn.in-head { display: none; }
-  .city-btn.in-search { display: inline-flex; flex: none; max-width: 192px; height: 40px; padding: 0 8px; }
   .head .pill { display: flex; align-items: center; height: 52px; padding: 0 8px; background: var(--surface); border-radius: var(--r-l); }
   .pill a { display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--r); transition: background-color .15s var(--ease); }
   .pill a + a { margin-left: 12px; position: relative; }

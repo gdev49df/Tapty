@@ -113,7 +113,7 @@ document.addEventListener('click', (e) => {
   go(link.getAttribute('href'));
 });
 
-header.init({ go, rerender: () => render() });
+header.init({ go });
 
 history.scrollRestoration = 'manual';
 history.replaceState({ key, depth }, '');

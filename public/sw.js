@@ -1,5 +1,5 @@
 // Оффлайн: оболочка приложения, последние объявления и уже виденные фото.
-const VERSION = 'v6';
+const VERSION = 'v7';
 const SHELL = `shell-${VERSION}`;
 const DATA = `data-${VERSION}`;
 const PHOTOS = `photos-${VERSION}`;
