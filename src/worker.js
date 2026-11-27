@@ -3,6 +3,7 @@ import { HttpError, fail, json, limit, randomHex, safeEqual, sha256 } from './ut
 import * as listings from './listings.js';
 import { servePhoto, uploadPhoto } from './photos.js';
 import { botInfo, pollLogin, startLogin, webhook } from './telegram.js';
+import { draftFromPhoto } from './ai.js';
 import { CITIES } from '../public/js/catalog.js';
 
 let salt = null;
@@ -36,7 +37,7 @@ async function api(request, env, ctx, url) {
 
   if (method === 'GET' && path === '/config') {
     const bot = await botInfo(env, url.origin);
-    return json({ telegram: Boolean(env.BOT_TOKEN), bot: bot?.username || null });
+    return json({ telegram: Boolean(env.BOT_TOKEN), bot: bot?.username || null, ai: Boolean(env.AI) });
   }
   if (method === 'GET' && path === '/me') {
     return json({ user: who.user ? { name: who.user.name, username: who.user.username } : null });
@@ -48,17 +49,20 @@ async function api(request, env, ctx, url) {
     return json({ ok: true });
   }
 
+  if (method === 'POST' && path === '/ai/draft') return draftFromPhoto(request, env, url, who);
+
   if (path === '/listings') {
     if (method === 'GET') return listings.listListings(env, url);
     if (method === 'POST') return listings.createListing(request, env, ctx, who);
   }
-  if ((m = /^\/listings\/(\d{1,12})(\/contact|\/report|\/status)?$/.exec(path))) {
+  if ((m = /^\/listings\/(\d{1,12})(\/contact|\/report|\/status|\/seller)?$/.exec(path))) {
     const id = Number(m[1]);
     if (!m[2]) {
       if (method === 'GET') return listings.getListing(env, ctx, id, who);
       if (method === 'PUT') return listings.updateListing(request, env, id, who);
       if (method === 'DELETE') return listings.deleteListing(env, id, who);
     }
+    if (method === 'GET' && m[2] === '/seller') return listings.sellerPage(env, id);
     if (method === 'POST' && m[2] === '/contact') return listings.getContact(env, id, who);
     if (method === 'POST' && m[2] === '/report') return listings.reportListing(request, env, id, who);
     if (method === 'POST' && m[2] === '/status') return listings.setStatus(request, env, id, who);

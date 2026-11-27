@@ -87,15 +87,55 @@ export async function listListings(env, url) {
     'bumped_at DESC, id DESC';
   const offset = Math.min(Math.max(parseInt(p.get('offset'), 10) || 0, 0), 5000);
 
-  const { results } = await env.DB.prepare(
-    `SELECT ${CARD} FROM listings WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ${PAGE + 1} OFFSET ${offset}`
-  )
-    .bind(...args)
-    .all();
+  const filter = where.join(' AND ');
+  const [{ results }, count] = await Promise.all([
+    env.DB.prepare(`SELECT ${CARD} FROM listings WHERE ${filter} ORDER BY ${order} LIMIT ${PAGE + 1} OFFSET ${offset}`)
+      .bind(...args)
+      .all(),
+    // Общее число нужно только для заголовка, поэтому считаем один раз — на первой порции.
+    offset ? null : env.DB.prepare(`SELECT COUNT(*) AS total FROM listings WHERE ${filter}`).bind(...args).first(),
+  ]);
   return json({
     items: results.slice(0, PAGE).map(card),
     next: results.length > PAGE ? offset + PAGE : null,
+    total: count?.total,
   });
+}
+
+const LIVE = "status = 'active' AND expires_at > ?";
+
+// Сколько у продавца активных объявлений и с какого момента он на Tapty.
+async function sellerInfo(env, owner) {
+  const row = await env.DB.prepare(
+    `SELECT MIN(created_at) AS since, SUM(${LIVE}) AS count FROM listings WHERE owner = ?`
+  )
+    .bind(now(), owner)
+    .first();
+  return { since: row.since, count: row.count || 0 };
+}
+
+// Та же категория; сначала из того же города.
+async function similar(env, row) {
+  const { results } = await env.DB.prepare(
+    `SELECT ${CARD} FROM listings WHERE ${LIVE} AND category = ? AND id != ?
+     ORDER BY city = ? DESC, bumped_at DESC LIMIT 10`
+  )
+    .bind(now(), row.category, row.id, row.city)
+    .all();
+  return results.map(card);
+}
+
+// Все объявления продавца. Открывается по любому его объявлению, чтобы не раскрывать, кто владелец.
+export async function sellerPage(env, id) {
+  const row = await findRow(env, id);
+  if (row.status === 'hidden') fail(404, 'not_found');
+  const [info, { results }] = await Promise.all([
+    sellerInfo(env, row.owner),
+    env.DB.prepare(`SELECT ${CARD} FROM listings WHERE ${LIVE} AND owner = ? ORDER BY bumped_at DESC, id DESC LIMIT 100`)
+      .bind(now(), row.owner)
+      .all(),
+  ]);
+  return json({ seller: { name: row.name, ...info }, items: results.map(card) });
 }
 
 async function findRow(env, id) {
@@ -121,7 +161,9 @@ export async function getListing(env, ctx, id, { owner, ip }) {
       )
     );
   }
-  return json({ item: { ...detail(row), mine } });
+  const [seller, more] = await Promise.all([sellerInfo(env, row.owner), similar(env, row)]);
+  // Сам номер отдаётся только по нажатию «Связаться», здесь — лишь способы связи.
+  return json({ item: { ...detail(row), mine, whatsapp: Boolean(row.whatsapp) }, seller, similar: more });
 }
 
 export async function getContact(env, id, { ip }) {

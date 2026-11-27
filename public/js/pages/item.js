@@ -1,17 +1,17 @@
 import { api } from '../api.js';
 import { CATEGORIES, REPORT_REASONS } from '../catalog.js';
 import { icon } from '../icons.js';
-import { label, t } from '../i18n.js';
+import { adsCount, label, t } from '../i18n.js';
 import { favorites } from '../store.js';
-import { $, cityName, copyText, dateText, emptyState, errorText, esc, money, phoneText, priceText, sheet, toast } from '../ui.js';
+import { $, $$, cardHtml, cityName, copyText, dateText, emptyState, errorText, esc, initial, money, phoneText, priceText, sheet, sinceText, toast } from '../ui.js';
 
 export default async function itemPage({ root, params, alive, back, go }) {
   const id = Number(params[0]);
   root.innerHTML = '<div class="item"><div class="gallery skel-block"></div></div>';
 
-  let item;
+  let item, seller, similar;
   try {
-    ({ item } = await api(`/listings/${id}`));
+    ({ item, seller, similar = [] } = await api(`/listings/${id}`));
   } catch (e) {
     if (!alive()) return;
     const missing = e.status === 404;
@@ -26,54 +26,97 @@ export default async function itemPage({ root, params, alive, back, go }) {
   document.title = `${item.title} — Tapty`;
 
   const on = favorites.has(id);
-  const category = label(CATEGORIES.find((c) => c.id === item.category));
+  const category = CATEGORIES.find((c) => c.id === item.category);
   const place = [cityName(item.city), item.district].filter(Boolean).join(', ');
-  const tags = [item.priceType !== 'free' && t(item.priceType), item.condition && t(item.condition), category].filter(Boolean);
   const active = item.status === 'active';
+  const canWrite = active && !item.mine && item.whatsapp;
+  const many = item.photos.length > 1;
+  const specs = [
+    [t('category'), label(category)],
+    item.condition && [t('condition'), t(item.condition)],
+    [t('deal'), t(item.priceType)],
+    [t('location'), place],
+    [t('published'), dateText(item.createdAt)],
+    [t('views'), item.views],
+  ].filter(Boolean);
 
   root.innerHTML = `
     <article class="item">
-      <div class="gallery-wrap">
-        <div class="gallery" tabindex="0" aria-label="${esc(t('photos'))}">
+      <div class="col-main">
+        <div class="item-media">
+          <div class="gallery-wrap">
+            <div class="gallery" tabindex="0" aria-label="${esc(t('photos'))}">
+              ${
+                item.photos.length
+                  ? item.photos.map((p, i) => `<img src="/p/${p}" alt="${esc(item.title)}, ${i + 1}" ${i ? 'loading="lazy"' : ''}>`).join('')
+                  : `<div class="no-photo">${icon('camera')}</div>`
+              }
+            </div>
+            <button class="round g-back" aria-label="${esc(t('back'))}">${icon('back')}</button>
+            <div class="g-actions">
+              <button class="round" data-share aria-label="${esc(t('share'))}">${icon('share')}</button>
+              <button class="round heart" data-fav="${id}" aria-pressed="${on}" aria-label="${esc(t(on ? 'fromFav' : 'toFav'))}">${icon('heart')}</button>
+            </div>
+            ${
+              many
+                ? `<span class="counter" aria-live="polite">1 / ${item.photos.length}</span>
+                   <button class="round g-prev" aria-label="←">${icon('back')}</button><button class="round g-next" aria-label="→">${icon('next')}</button>`
+                : ''
+            }
+          </div>
           ${
-            item.photos.length
-              ? item.photos.map((p, i) => `<img src="/p/${p}" alt="${esc(item.title)}, ${i + 1}" ${i ? 'loading="lazy"' : ''}>`).join('')
-              : `<div class="no-photo">${icon('camera')}</div>`
+            many
+              ? `<div class="thumbs">${item.photos
+                  .map((p, i) => `<button data-slide="${i}" aria-label="${esc(t('photos'))} ${i + 1}"${i ? '' : ' aria-current="true"'}><img src="/p/${p}/t" alt="" loading="lazy"></button>`)
+                  .join('')}</div>`
+              : ''
           }
         </div>
-        <button class="round g-back" aria-label="${esc(t('back'))}">${icon('back')}</button>
-        <div class="g-actions">
-          <button class="round" data-share aria-label="${esc(t('share'))}">${icon('share')}</button>
-          <button class="round heart" data-fav="${id}" aria-pressed="${on}" aria-label="${esc(t(on ? 'fromFav' : 'toFav'))}">${icon('heart')}</button>
+        <div class="item-more">
+          ${item.description ? `<section><h2>${esc(t('description'))}</h2><p class="desc">${esc(item.description)}</p></section>` : ''}
+          <section><h2>${esc(t('specs'))}</h2>
+            <dl class="specs">${specs.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>
+          </section>
+          ${
+            canWrite
+              ? `<section class="write"><h2>${esc(t('writeSeller'))}</h2>
+                  <div class="quick">${['q_available', 'q_where', ...(item.priceType === 'bargain' ? ['q_price'] : [])]
+                    .map((k) => `<button type="button" data-quick="${k}">${esc(t(k))}</button>`)
+                    .join('')}</div>
+                  <textarea class="input" rows="3" maxlength="500" aria-label="${esc(t('message'))}" placeholder="${esc(t('messageHint'))}"></textarea>
+                  <div class="write-foot"><p class="muted small">${esc(t('messageNote'))}</p>
+                  <button type="button" class="btn ghost" data-send>${icon('send')}${esc(t('sendMessage'))}</button></div>
+                </section>`
+              : ''
+          }
         </div>
-        ${
-          item.photos.length > 1
-            ? `<span class="counter" aria-live="polite">1 / ${item.photos.length}</span>
-               <button class="round g-prev" aria-label="←">${icon('back')}</button><button class="round g-next" aria-label="→">${icon('next')}</button>`
-            : ''
-        }
       </div>
-      <div class="item-info">
-        ${active ? '' : `<p class="status-note">${esc(t(`st_${item.status}`))}</p>`}
-        <p class="price-tag">${esc(priceText(item))}</p>
-        <h1>${esc(item.title)}</h1>
-        <ul class="tags">${tags.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
-        <p class="meta">${icon('pin')}${esc(place)}</p>
-        <div class="actions"></div>
-        ${item.description ? `<section><h2>${esc(t('description'))}</h2><p class="desc">${esc(item.description)}</p></section>` : ''}
-        <section class="seller">
-          <span class="avatar" aria-hidden="true">${esc([...item.name][0]?.toUpperCase() || '?')}</span>
-          <div><strong>${esc(item.name)}</strong><small>${esc(t('seller'))}</small></div>
-        </section>
-        <p class="meta small">${esc(t('published'))}: ${esc(dateText(item.createdAt))}</p>
-        <p class="meta small">${icon('eye')}${esc(t('views'))}: ${item.views}</p>
-        ${
-          item.mine
-            ? ''
-            : `<p class="safety">${icon('shield')}<span>${esc(t('safety'))}</span></p>
-               <button class="link-btn" data-report>${icon('flag')}${esc(t('report'))}</button>`
-        }
+      <div class="col-side">
+        <div class="item-info">
+          <nav class="crumbs" aria-label="breadcrumb"><a href="/">${esc(t('catalog'))}</a>${icon('next')}<a href="/search?cat=${item.category}&city=">${esc(label(category))}</a></nav>
+          ${active ? '' : `<p class="status-note">${esc(t(`st_${item.status}`))}</p>`}
+          <p class="price-tag">${esc(priceText(item))}</p>
+          <h1>${esc(item.title)}</h1>
+          <p class="meta">${icon('pin')}${esc(place)}</p>
+          <p class="meta">${icon('clock')}${esc(dateText(item.createdAt))}</p>
+          <div class="actions"></div>
+        </div>
+        <div class="item-seller">
+          <section class="seller-card">
+            <span class="avatar" aria-hidden="true">${initial(item.name)}</span>
+            <div><h2>${esc(item.name)}</h2>
+              ${seller ? `<p>${esc(sinceText(seller.since))}</p><p>${esc(adsCount(seller.count))}</p>` : ''}</div>
+            <a class="btn ghost wide" href="/seller/${id}">${esc(t('allSellerAds'))}</a>
+          </section>
+          ${item.mine ? '' : `<p class="safety">${icon('shield')}<span>${esc(t('safety'))}</span></p>`}
+          ${item.mine ? '' : `<button class="link-btn" data-report>${icon('flag')}${esc(t('report'))}</button>`}
+        </div>
       </div>
+      ${
+        similar.length
+          ? `<section class="similar"><h2>${esc(t('similar'))}</h2><div class="grid">${similar.map(cardHtml).join('')}</div></section>`
+          : ''
+      }
     </article>`;
 
   const actions = $('.actions', root);
@@ -93,9 +136,13 @@ export default async function itemPage({ root, params, alive, back, go }) {
   const gallery = $('.gallery', root);
   const counter = $('.counter', root);
   if (counter) {
+    const thumbs = $$('[data-slide]', root);
     gallery.addEventListener('scroll', () => {
-      counter.textContent = `${Math.round(gallery.scrollLeft / gallery.clientWidth) + 1} / ${item.photos.length}`;
+      const at = Math.round(gallery.scrollLeft / gallery.clientWidth);
+      counter.textContent = `${at + 1} / ${item.photos.length}`;
+      thumbs.forEach((b, i) => (i === at ? b.setAttribute('aria-current', 'true') : b.removeAttribute('aria-current')));
     }, { passive: true });
+    thumbs.forEach((b, i) => (b.onclick = () => gallery.scrollTo({ left: i * gallery.clientWidth, behavior: 'smooth' })));
     $('.g-prev', root).onclick = () => gallery.scrollBy({ left: -gallery.clientWidth, behavior: 'smooth' });
     $('.g-next', root).onclick = () => gallery.scrollBy({ left: gallery.clientWidth, behavior: 'smooth' });
   }
@@ -162,6 +209,34 @@ export default async function itemPage({ root, params, alive, back, go }) {
       s.body.innerHTML = `<p>${esc(errorText(e))}</p>`;
     }
   });
+
+  const write = $('.write', root);
+  if (write) {
+    const field = $('textarea', write);
+    const send = $('[data-send]', write);
+    write.addEventListener('click', (e) => {
+      const key = e.target.closest('[data-quick]')?.dataset.quick;
+      if (!key) return;
+      field.value = t(key);
+      field.focus();
+    });
+    send.onclick = async () => {
+      const text = field.value.trim();
+      if (!text) {
+        field.focus();
+        return toast(t('messageEmpty'));
+      }
+      send.disabled = true;
+      try {
+        const c = await contact();
+        // Переход в той же вкладке: всплывающее окно после ожидания браузер заблокировал бы.
+        location.assign(waLink(c.phone, `\n${text}`));
+      } catch (e) {
+        toast(errorText(e));
+      }
+      send.disabled = false;
+    };
+  }
 
   $('[data-report]', root)?.addEventListener('click', () => {
     const s = sheet(

@@ -34,6 +34,16 @@ export function dateText(seconds) {
   return `${date.getDate()} ${MONTHS[lang()][date.getMonth()]}${year}`;
 }
 
+const KK_FROM = ['қаңтардан', 'ақпаннан', 'наурыздан', 'сәуірден', 'мамырдан', 'маусымнан', 'шілдеден', 'тамыздан', 'қыркүйектен', 'қазаннан', 'қарашадан', 'желтоқсаннан'];
+
+export function sinceText(seconds) {
+  const date = new Date(seconds * 1000);
+  const [m, y] = [date.getMonth(), date.getFullYear()];
+  return lang() === 'kk' ? `Tapty-де ${y} жылғы ${KK_FROM[m]}` : `На Tapty с ${MONTHS.ru[m]} ${y}`;
+}
+
+export const initial = (name) => esc([...String(name)][0]?.toUpperCase() || '?');
+
 export const phoneText = (p) => `+${p[0]} ${p.slice(1, 4)} ${p.slice(4, 7)} ${p.slice(7, 9)} ${p.slice(9)}`;
 
 let toastTimer;
@@ -173,7 +183,7 @@ export function feed(root, load, { empty, state = { items: [], next: 0 }, alive 
     if (busy || state.next === null || !alive()) return;
     busy = true;
     if (!state.items.length) grid.innerHTML = skeleton();
-    end.innerHTML = '';
+    end.innerHTML = state.items.length ? `<p class="loading-more">${esc(t('loadingMore'))}</p>` : '';
     observer.unobserve(end);
     try {
       const data = await load(state.next);
@@ -184,7 +194,7 @@ export function feed(root, load, { empty, state = { items: [], next: 0 }, alive 
       state.items.push(...fresh);
       state.next = data.next;
       grid.insertAdjacentHTML('beforeend', fresh.map(cardHtml).join(''));
-      if (!state.items.length) end.innerHTML = empty;
+      end.innerHTML = state.items.length ? '' : empty;
       busy = false;
       if (state.next !== null) observer.observe(end);
     } catch (e) {

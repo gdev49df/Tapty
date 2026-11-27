@@ -1,8 +1,8 @@
 import { api, config, currentUser } from '../api.js';
 import { CATEGORIES, CITIES, CONDITIONS, LIMITS, PRICE_TYPES, normalizePhone } from '../catalog.js';
 import { icon } from '../icons.js';
-import { label, t } from '../i18n.js';
-import { compress } from '../images.js';
+import { label, lang, t } from '../i18n.js';
+import { compress, forAi } from '../images.js';
 import { loginBlock } from '../login.js';
 import { store } from '../store.js';
 import { $, $$, emptyState, errorText, esc, phoneText, toast } from '../ui.js';
@@ -18,9 +18,11 @@ export default async function post({ root, params, alive, go, back, rerender, on
   $('[data-back]', root).onclick = back;
 
   let values;
+  let aiOn = false;
   try {
     const [cfg, user] = await Promise.all([config(), currentUser()]);
     if (!alive()) return;
+    aiOn = cfg.ai;
     if (!editId && cfg.telegram && !user) {
       root.insertAdjacentHTML('beforeend', '<div class="narrow login-slot"></div>');
       loginBlock($('.login-slot', root), { onDone: rerender, onLeave });
@@ -57,20 +59,27 @@ export default async function post({ root, params, alive, go, back, rerender, on
   root.insertAdjacentHTML(
     'beforeend',
     `<form class="form narrow" novalidate>
-      <fieldset data-field="photos"><legend>${esc(t('photos'))}</legend>
+      <fieldset data-field="photos" class="form-part"><legend>${esc(t('sPhoto'))}</legend>
         <p class="muted">${esc(t('photosHint'))}</p>
         <div class="uploader"></div>
         <input type="file" accept="image/*" multiple hidden>
         <em></em>
+        <div class="ai" hidden>
+          <button type="button" class="btn ghost wide" data-ai>${icon('scan')}<span>${esc(t('aiFill'))}</span></button>
+          <p class="muted small">${esc(t('aiHint'))}</p>
+        </div>
       </fieldset>
+      <h2 class="form-title">${esc(t('sAbout'))}</h2>
       ${text('title', t('fTitle'), `maxlength="${LIMITS.titleMax}"`, t('fTitleHint'))}
       ${select('category', CATEGORIES, t('category'))}
       <fieldset data-field="condition"><legend>${esc(t('condition'))}</legend><div class="segs">${segs('condition', CONDITIONS)}</div><em></em></fieldset>
+      <label class="field" data-field="description"><span>${esc(t('fDesc'))}</span>
+        <textarea class="input" name="description" rows="5" maxlength="${LIMITS.descMax}" placeholder="${esc(t('fDescHint'))}">${esc(values.description)}</textarea><em></em></label>
+      <h2 class="form-title">${esc(t('sPrice'))}</h2>
       <fieldset><legend>${esc(t('deal'))}</legend><div class="segs">${segs('priceType', PRICE_TYPES)}</div></fieldset>
       <label class="field" data-field="price"><span>${esc(t('fPrice'))}</span>
         <input class="input big" name="price" inputmode="numeric" value="${esc(values.price ? spaced(values.price) : '')}" maxlength="15"><em></em></label>
-      <label class="field" data-field="description"><span>${esc(t('fDesc'))}</span>
-        <textarea class="input" name="description" rows="5" maxlength="${LIMITS.descMax}" placeholder="${esc(t('fDescHint'))}">${esc(values.description)}</textarea><em></em></label>
+      <h2 class="form-title">${esc(t('sContacts'))}</h2>
       ${select('city', CITIES, t('city'))}
       ${text('district', t('fDistrict'), `maxlength="${LIMITS.districtMax}"`)}
       ${text('name', t('fName'), `maxlength="${LIMITS.nameMax}" autocomplete="name"`)}
@@ -132,7 +141,9 @@ export default async function post({ root, params, alive, go, back, rerender, on
 
   const uploader = $('.uploader', form);
   const fileInput = $('input[type="file"]', form);
+  const aiBox = $('.ai', form);
   const drawPhotos = () => {
+    aiBox.hidden = !aiOn || !photos.some((p) => p.id);
     uploader.innerHTML =
       photos
         .map(
@@ -196,6 +207,42 @@ export default async function post({ root, params, alive, go, back, rerender, on
       drawPhotos();
       saveDraft();
     }
+  });
+
+  // Нейросеть заполняет только пустые поля: написанное человеком не трогаем.
+  const aiButton = $('[data-ai]', form);
+  aiButton.addEventListener('click', async () => {
+    const f = form.elements;
+    const photo = photos.find((p) => p.id);
+    if (!photo) return;
+    if (f.title.value.trim() && f.description.value.trim() && f.category.value) return toast(t('aiFull'));
+    aiButton.disabled = true;
+    aiButton.classList.add('busy');
+    $('span', aiButton).textContent = t('aiBusy');
+    try {
+      // У сохранённых фото берём полный размер, а не миниатюру.
+      const image = await forAi(photo.preview.replace(/\/t$/, ''));
+      const { draft: found } = await api(`/ai/draft?lang=${lang()}`, { method: 'POST', body: image });
+      if (!alive()) return;
+      const fill = (name, value) => {
+        if (!value || f[name].value.trim()) return;
+        f[name].value = value;
+        f[name].closest('[data-field]')?.classList.remove('bad');
+      };
+      fill('title', found.title);
+      fill('description', found.description);
+      fill('category', found.category);
+      if (found.condition && !f.condition.value) f.condition.value = found.condition;
+      sync();
+      saveDraft();
+      toast(t('aiDone'));
+    } catch (e) {
+      if (!alive()) return;
+      toast(e.code ? errorText(e) : t('badPhoto'));
+    }
+    aiButton.disabled = false;
+    aiButton.classList.remove('busy');
+    $('span', aiButton).textContent = t('aiFill');
   });
 
   const showError = (field) => {

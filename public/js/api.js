@@ -23,7 +23,7 @@ export class ApiError extends Error {
 
 export async function api(path, { method = 'GET', body, headers = {}, signal } = {}) {
   const init = { method, signal, headers: { authorization: `Bearer ${auth.token()}`, ...headers } };
-  if (body instanceof FormData) init.body = body;
+  if (body instanceof FormData || body instanceof Blob) init.body = body;
   else if (body !== undefined) {
     init.body = JSON.stringify(body);
     init.headers['content-type'] = 'application/json';

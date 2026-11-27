@@ -10,14 +10,17 @@ import post from './pages/post.js';
 import fav from './pages/fav.js';
 import me from './pages/me.js';
 import rules from './pages/rules.js';
+import seller from './pages/seller.js';
+import { footer } from './footer.js';
 import admin from './pages/admin.js';
 
 const ROUTES = [
   [/^\/$/, home, 'home'],
-  [/^\/search$/, search, 'search'],
+  [/^\/search$/, search, 'home'],
   [/^\/new$/, post, 'new'],
   [/^\/edit\/(\d+)$/, post, 'me'],
   [/^\/item\/(\d+)$/, item, ''],
+  [/^\/seller\/(\d+)$/, seller, ''],
   [/^\/fav$/, fav, 'fav'],
   [/^\/me$/, me, 'me'],
   [/^\/rules$/, rules, 'me'],
@@ -46,17 +49,15 @@ const back = () => (depth > 0 ? history.back() : go('/', { replace: true }));
 
 function chrome(tab) {
   const tabs = [
-    ['home', '/', 'home'],
-    ['search', '/search', 'search'],
-    ['new', '/new', 'plus'],
-    ['fav', '/fav', 'heart'],
-    ['me', '/me', 'user'],
+    ['home', '/', 'grid', t('catalog')],
+    ['fav', '/fav', 'heart', t('fav')],
+    ['new', '/new', 'plus', t('post')],
+    ['me', '/me', 'user', t('me')],
   ];
-  const name = { home: t('home'), search: t('search'), new: t('post'), fav: t('fav'), me: t('me') };
   $('#tabs').innerHTML = tabs
     .map(
-      ([id, href, ic]) =>
-        `<a href="${href}" class="tab tab-${id}"${id === tab ? ' aria-current="page"' : ''}><span>${icon(ic)}</span>${esc(name[id])}</a>`
+      ([id, href, ic, name]) =>
+        `<a href="${href}" class="tab tab-${id}"${id === tab ? ' aria-current="page"' : ''}><span>${icon(ic)}</span>${esc(name)}</a>`
     )
     .join('');
   header.update(tab);
@@ -78,6 +79,8 @@ async function render({ restored = false } = {}) {
   document.title = 'Tapty — объявления по Казахстану';
   document.body.dataset.page = isItem ? 'item' : path === '/' ? 'home' : path === '/search' ? 'search' : '';
   chrome(tab);
+  // В форме, профиле и модерации подвал только мешает.
+  footer.update(![post, me, admin].includes(page));
 
   view.innerHTML = '';
   const restore = scroll.get(key) ?? 0;

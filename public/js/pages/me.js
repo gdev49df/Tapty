@@ -63,7 +63,7 @@ export default async function me({ root, alive, rerender, onLeave }) {
     list.innerHTML = items
       .map((i) => {
         const actions = [];
-        if (i.status === 'active') actions.push(button(i.id, 'sold', t('sold'), ''));
+        if (i.status === 'active') actions.push(button(i.id, 'sold', t('sold')));
         if (i.status === 'sold') actions.push(button(i.id, 'restore', t('restore'), ''));
         if (i.status === 'expired') actions.push(button(i.id, 'extend', t('extend'), ''));
         if (i.status !== 'hidden') {

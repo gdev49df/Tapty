@@ -48,3 +48,11 @@ export async function compress(file) {
     thumb: await encode(img, 520, 45_000, LIMITS.thumbBytes, type),
   };
 }
+
+// Небольшая JPEG-копия для нейросети: этого хватает, чтобы узнать вещь.
+export async function forAi(url) {
+  const img = new Image();
+  img.src = url;
+  await img.decode();
+  return encode(img, 768, 150_000, 390_000, 'image/jpeg');
+}

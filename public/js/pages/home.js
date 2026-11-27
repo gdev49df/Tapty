@@ -14,7 +14,6 @@ export default function home({ root, alive, onLeave, restored }) {
   if (!restored || !cache || cache.city !== city) cache = { city, cat, state: { items: [], next: 0 } };
 
   root.innerHTML = `
-    <h1 class="sr-only">Tapty</h1>
     <div class="cats-wrap">
       <div class="cats" role="group" aria-label="${esc(t('category'))}">
         ${CATEGORIES.map(
@@ -25,15 +24,27 @@ export default function home({ root, alive, onLeave, restored }) {
       <button class="cats-arrow prev" aria-label="${esc(t('scrollBack'))}" hidden>${icon('back')}</button>
       <button class="cats-arrow next" aria-label="${esc(t('scrollNext'))}" hidden>${icon('next')}</button>
     </div>
+    <div class="feed-head"><h1></h1><span></span></div>
     <div class="feed"></div>`;
 
   let stop = () => {};
   const start = () => {
     stop();
-    const { cat: current, state } = cache;
+    const entry = cache;
+    const { cat: current, state } = entry;
+    const title = () => {
+      $('.feed-head h1', root).textContent = label(CATEGORIES.find((c) => c.id === current)) || t('allAds');
+      $('.feed-head span', root).textContent = entry.total ?? '';
+    };
+    title();
     stop = feed(
       $('.feed', root),
-      (offset) => api(`/listings?${new URLSearchParams({ offset, city, cat: current })}`),
+      async (offset) => {
+        const data = await api(`/listings?${new URLSearchParams({ offset, city, cat: current })}`);
+        if (data.total != null) entry.total = data.total;
+        if (alive() && cache === entry) title();
+        return data;
+      },
       {
         state,
         alive: () => alive() && cache.state === state,
