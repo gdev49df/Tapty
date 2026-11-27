@@ -1,6 +1,7 @@
 import { api, config, currentUser, dropSession } from '../api.js';
 import { authForm } from '../auth.js';
 import { CATEGORIES, CITIES, CONDITIONS, LIMITS, PRICE_TYPES, normalizePhone } from '../catalog.js';
+import { askDeleteListing } from '../dialogs.js';
 import { icon } from '../icons.js';
 import { adsCount, label, lang, t } from '../i18n.js';
 import { compress, forAi } from '../images.js';
@@ -93,10 +94,25 @@ export default async function post({ root, params, alive, go, back, rerender, on
       <p class="form-error" role="alert"></p>
       <button class="btn wide submit">${esc(t(editId ? 'save' : 'publish'))}</button>
       <p class="muted small">${esc(t('agree'))} <a href="/rules">${esc(t('rules'))}</a></p>
+      ${editId && values.status !== 'hidden' ? `<button type="button" class="btn ghost wide delete-ad" data-delete>${icon('trash')}<span>${esc(t('removeAd'))}</span></button>` : ''}
     </form>`
   );
 
   const form = $('form', root);
+  const remove = $('[data-delete]', form);
+  remove?.addEventListener('click', () =>
+    askDeleteListing(async () => {
+      remove.disabled = true;
+      try {
+        await api(`/listings/${editId}`, { method: 'DELETE' });
+        toast(t('removed'));
+        if (alive()) go('/me', { replace: true });
+      } catch (err) {
+        remove.disabled = false;
+        toast(errorText(err));
+      }
+    })
+  );
   const phoneInput = form.elements.phone;
   const prettyPhone = () => {
     const p = normalizePhone(phoneInput.value);

@@ -1,5 +1,6 @@
 import { api, currentUser, signOut } from '../api.js';
 import { authForm, codeSheet, deleteSheet, passwordSheet } from '../auth.js';
+import { askDeleteListing } from '../dialogs.js';
 import { icon } from '../icons.js';
 import { lang, t } from '../i18n.js';
 import { store } from '../store.js';
@@ -114,11 +115,7 @@ export default async function me({ root, alive, rerender }) {
       }
     };
     if (action !== 'delete') return run();
-    const s = sheet(`<p>${esc(t('removeHint'))}</p><button class="btn wide danger">${esc(t('remove'))}</button>`, { title: t('removeAsk') });
-    $('button', s.body).onclick = () => {
-      s.close();
-      run();
-    };
+    askDeleteListing(run);
   });
 
   function drawMenu() {

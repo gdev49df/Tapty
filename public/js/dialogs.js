@@ -1,4 +1,4 @@
-// Удаление диалога: общее предупреждение для списка чатов и самой переписки.
+// Предупреждения перед удалением.
 import { api } from './api.js';
 import { t } from './i18n.js';
 import { refreshUnread } from './unread.js';
@@ -23,5 +23,14 @@ export function askDeleteChat(id, name, onDone) {
       yes.disabled = false;
       toast(errorText(e));
     }
+  };
+}
+
+// Объявление удаляют из «Моих объявлений» и со страницы редактирования.
+export function askDeleteListing(onYes) {
+  const s = sheet(`<p>${esc(t('removeHint'))}</p><button class="btn wide danger">${esc(t('remove'))}</button>`, { title: t('removeAsk') });
+  $('button', s.body).onclick = () => {
+    s.close();
+    onYes();
   };
 }

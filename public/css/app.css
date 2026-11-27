@@ -181,6 +181,8 @@ body[data-page='home'] #view, body[data-page='search'] #view { padding-top: 0; }
 .btn:active { background: var(--accent-press); transform: scale(.98); }
 .btn.ghost { background: var(--surface-2); color: var(--text); }
 .btn.danger { background: var(--danger); }
+.btn.delete-ad, .btn.delete-ad:active { color: var(--error); }
+.btn.delete-ad:active { background: var(--line); }
 .btn.small { min-height: 36px; padding: 4px 12px; font-weight: 500; border-radius: var(--r-s); }
 .btn.wide { width: 100%; }
 .btn:not([href]):is(a) { opacity: .5; }
