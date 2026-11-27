@@ -6,9 +6,11 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test": "node test/api.test.mjs"
+    "test": "node test/api.test.mjs",
+    "backup": "wrangler d1 export tapty --remote --output tapty-backup.sql",
+    "audit": "npm audit"
   },
   "devDependencies": {
-    "wrangler": "^4.0.0"
+    "wrangler": "^4.169.0"
   }
 }

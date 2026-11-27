@@ -16,7 +16,7 @@ export const fail = (status, code, field) => {
 // Заголовки для ответов воркера. Статическим файлам такие же задаёт public/_headers.
 export const GUARD = {
   'x-content-type-options': 'nosniff',
-  'strict-transport-security': 'max-age=31536000',
+  'strict-transport-security': 'max-age=31536000; includeSubDomains',
   'referrer-policy': 'strict-origin-when-cross-origin',
 };
 
@@ -27,6 +27,7 @@ export function json(data, status = 200, headers = {}) {
       'content-type': 'application/json; charset=utf-8',
       'cache-control': 'no-store',
       'content-security-policy': "default-src 'none'; frame-ancestors 'none'",
+      'cross-origin-resource-policy': 'same-origin',
       ...GUARD,
       ...headers,
     },
@@ -98,3 +99,6 @@ export function network(ip) {
   const groups = tail ? [...head, ...Array(Math.max(0, 8 - head.length - tail.length)).fill('0'), ...tail] : head;
   return groups.slice(0, 4).map((g) => parseInt(g, 16).toString(16)).join(':');
 }
+
+// Запрос по http к настоящему сайту (локальный запуск не в счёт).
+export const insecure = (url) => url.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);

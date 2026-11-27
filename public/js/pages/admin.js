@@ -1,23 +1,63 @@
-// Модерация: открывается по адресу /admin и ключу из секрета ADMIN_KEY.
+// Модерация: открывается по адресу /admin и ключу из секрета ADMIN_KEY. Если задан секрет
+// ADMIN_TOTP, дополнительно нужен код из приложения-аутентификатора.
 import { api, apiBlob } from '../api.js';
 import { $, errorText, esc, phoneText, priceText, toast } from '../ui.js';
 
 let adminKey = '';
+// пропуск после кода из приложения, живёт 12 часов и только в этой вкладке
+let adminPass = '';
+
+const MESSAGES = {
+  forbidden: 'Неверный ключ',
+  not_found: 'Сначала задайте секрет ADMIN_KEY',
+  bad_totp: 'Код не подошёл. Дождитесь следующего и введите его',
+  totp_config: 'Секрет ADMIN_TOTP записан неверно',
+};
+
+function newSecret() {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  return [...crypto.getRandomValues(new Uint8Array(32))].map((b) => alphabet[b & 31]).join('');
+}
 
 export default function admin({ root, alive }) {
   root.innerHTML = `
     <div class="page-head"><h1>Модерация</h1></div>
     <div class="narrow">
       <form class="form">
-        <label class="field"><span>Ключ администратора</span><input class="input" type="password" autocomplete="off"></label>
+        <label class="field"><span>Ключ администратора</span><input class="input" name="key" type="password" autocomplete="off"></label>
+        <label class="field" data-code hidden><span>Код из приложения</span><input class="input" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7"></label>
         <button class="btn wide">Показать жалобы</button>
       </form>
+      <div class="setup"></div>
       <div class="queue"></div>
       <div class="chat-queue"></div>
       <div class="review-queue"></div>
     </div>`;
   const queue = $('.queue', root);
-  const headers = () => ({ 'x-admin-key': encodeURIComponent(adminKey) });
+  const headers = () => ({ 'x-admin-key': encodeURIComponent(adminKey), ...(adminPass && { 'x-admin-pass': adminPass }) });
+  const form = $('form', root);
+  const codeField = $('[data-code]', root);
+  const setup = $('.setup', root);
+
+  // Показывается, пока вход по одному ключу: секрет создаётся в браузере и никуда не отправляется.
+  function offerCode() {
+    setup.innerHTML = `<article class="my">
+      <p><strong>Вход по коду выключен.</strong> Включите, чтобы одного ключа было мало.</p>
+      <div class="my-actions"><button type="button" class="btn small" data-setup>Создать секрет</button></div>
+    </article>`;
+  }
+
+  setup.addEventListener('click', (e) => {
+    if (!e.target.closest('[data-setup]')) return;
+    const secret = newSecret();
+    setup.innerHTML = `<article class="my">
+      <p>1. В Google Authenticator нажмите «+», «Ввести ключ настройки», имя tapty, тип «по времени» и вставьте секрет.</p>
+      <code class="backup-code">${secret.match(/.{4}/g).join(' ')}</code>
+      <div class="my-actions"><a class="btn small ghost" href="otpauth://totp/tapty:admin?secret=${secret}&amp;issuer=tapty">Открыть в приложении на телефоне</a></div>
+      <p>2. В Cloudflare откройте Workers &amp; Pages, tapty, Settings, Variables and Secrets и добавьте секрет <code>ADMIN_TOTP</code> с этим же значением.</p>
+      <p class="muted small">Секрет виден только сейчас. Никому его не пересылайте.</p>
+    </article>`;
+  });
   const reviewBox = $('.review-queue', root);
 
   async function loadReviews() {
@@ -115,7 +155,8 @@ export default function admin({ root, alive }) {
     try {
       const { items } = await api('/admin/reports', { headers: headers() });
       if (!alive()) return;
-      $('form', root).hidden = true;
+      form.hidden = true;
+      if (!adminPass && !setup.innerHTML) offerCode();
       queue.innerHTML = items.length
         ? items
             .map(
@@ -140,13 +181,27 @@ export default function admin({ root, alive }) {
       await loadComplaints();
       await loadReviews();
     } catch (e) {
-      toast(e.code === 'forbidden' ? 'Неверный ключ' : e.status === 404 ? 'Сначала задайте секрет ADMIN_KEY' : errorText(e));
+      if (e.code !== 'code_required') return toast(MESSAGES[e.code] || errorText(e));
+      // ключ верный, нужен код (или пропуск истёк)
+      adminPass = '';
+      form.hidden = false;
+      codeField.hidden = false;
+      form.elements.code.focus();
     }
   }
 
-  $('form', root).onsubmit = (e) => {
+  form.onsubmit = async (e) => {
     e.preventDefault();
-    adminKey = $('input', root).value.trim();
+    adminKey = form.elements.key.value.trim();
+    const code = form.elements.code.value.trim();
+    if (!codeField.hidden && code) {
+      try {
+        ({ pass: adminPass } = await api('/admin/session', { method: 'POST', body: { code }, headers: headers() }));
+        form.elements.code.value = '';
+      } catch (err) {
+        return toast(MESSAGES[err.code] || errorText(err));
+      }
+    }
     load();
   };
   queue.addEventListener('click', async (e) => {

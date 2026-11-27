@@ -20,6 +20,8 @@
   ],
   // Когда включите R2: создайте бакет tapty-photos и уберите комментарии ниже.
   // "r2_buckets": [{ "binding": "PHOTOS", "bucket_name": "tapty-photos" }],
+  // Общий предел запросов к API с одного адреса: 600 в минуту.
+  "ratelimits": [{ "name": "API_LIMIT", "namespace_id": "4207", "simple": { "limit": 600, "period": 60 } }],
   // Нейросеть для кнопки «Заполнить по фото».
   "ai": { "binding": "AI" },
   "observability": { "enabled": true }

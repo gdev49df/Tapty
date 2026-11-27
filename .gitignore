@@ -2,3 +2,8 @@ node_modules/
 .wrangler/
 .dev.vars
 *.log
+.env
+.env.*
+.dev.vars.*
+# копии базы: в них телефоны и переписка
+tapty-backup*.sql

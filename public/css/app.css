@@ -74,6 +74,9 @@ h2 { font-size: 18px; line-height: 1.35; font-weight: 600; }
 #promo button:hover { background: var(--surface-2); color: var(--text); }
 .has-promo #topbar, .has-promo #view { --safe-t: 0px; }
 
+/* включение входа по коду в модерации */
+.setup .my { display: flex; flex-direction: column; gap: 12px; }
+
 /* ---------- нижнее меню ---------- */
 #tabs { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(5, 1fr); height: calc(var(--tabs) + var(--safe-b)); padding-bottom: var(--safe-b); background: var(--bg); border-top: 1px solid var(--line); }
 .tab { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 11px; font-weight: 500; color: var(--muted); min-width: 0; }

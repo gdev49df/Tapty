@@ -1,5 +1,6 @@
 import { ensureSchema } from './schema.js';
-import { DAY, HttpError, attempt, fail, json, network, now, randomHex, safeEqual, sha256 } from './util.js';
+import { DAY, HttpError, fail, insecure, json, network, now, randomHex, sha256 } from './util.js';
+import { openAdmin, requireAdmin } from './admin.js';
 import * as listings from './listings.js';
 import { servePhoto, uploadPhoto } from './photos.js';
 import { SESSION_DAYS, changePassword, recover, register, replaceCode, requireUser, signIn, signOut } from './auth.js';
@@ -22,6 +23,8 @@ async function ipHash(request, env) {
 async function identify(request, env, ctx) {
   const token = /^Bearer ([a-f0-9]{64})$/.exec(request.headers.get('authorization') || '')?.[1];
   const ip = await ipHash(request, env);
+  // Общий предел запросов с адреса. Запас большой: за одним адресом мобильного оператора много людей.
+  if (env.API_LIMIT && !(await env.API_LIMIT.limit({ key: ip })).success) fail(429, 'rate_limit');
   if (!token) return { ip, owner: null, user: null };
   const hash = await sha256(token);
   const t = now();
@@ -41,6 +44,9 @@ async function identify(request, env, ctx) {
 async function api(request, env, ctx, url) {
   const method = request.method;
   const path = url.pathname.slice(4);
+  // Изменения принимаются только со страниц самого сайта.
+  const origin = request.headers.get('origin');
+  if (method !== 'GET' && method !== 'HEAD' && origin && origin !== url.origin) fail(403, 'foreign_origin');
   const who = await identify(request, env, ctx);
   let m;
 
@@ -118,16 +124,8 @@ async function api(request, env, ctx, url) {
   }
 
   if (path.startsWith('/admin/')) {
-    // Без секрета ADMIN_KEY админки не существует.
-    if (!env.ADMIN_KEY) fail(404, 'not_found');
-    let given = request.headers.get('x-admin-key') || '';
-    try {
-      given = decodeURIComponent(given);
-    } catch {}
-    // После 20 неверных ключей за час с адреса не принимается и верный.
-    const passed = await attempt(env, `admin:${who.ip}`, 20, 3600);
-    if (!(await safeEqual(given, env.ADMIN_KEY))) fail(403, 'forbidden');
-    await passed();
+    if (method === 'POST' && path === '/admin/session') return openAdmin(request, env, who);
+    await requireAdmin(request, env, who);
     if (method === 'GET' && path === '/admin/reports') return listings.adminReports(env);
     if (method === 'GET' && path === '/admin/complaints') return chat.adminComplaints(env);
     if (method === 'GET' && (m = /^\/admin\/chat-photos\/([a-f0-9]{24})$/.exec(path))) return chat.adminChatPhoto(env, m[1]);
@@ -173,10 +171,15 @@ async function itemPage(request, env, url, id) {
     .transform(shell);
 }
 
+// Отказы, по которым видно подбор или чужие попытки: они попадают в журнал воркера.
+const WATCHED = new Set(['bad_credentials', 'bad_code', 'wrong_password', 'forbidden', 'foreign_origin', 'bad_totp', 'rate_limit', 'banned']);
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname;
+    // по незашифрованному соединению сайт не отвечает, а отправляет на https
+    if (insecure(url)) return Response.redirect(`https://${url.host}${path}${url.search}`, 308);
     try {
       let m;
       if (path.startsWith('/api/')) {
@@ -193,7 +196,13 @@ export default {
       }
       return env.ASSETS.fetch(request);
     } catch (e) {
-      if (e instanceof HttpError) return json({ error: e.code, field: e.field }, e.status);
+      if (e instanceof HttpError) {
+        // без логинов, паролей и ключей: только что произошло и на каком адресе
+        if (WATCHED.has(e.code)) {
+          console.warn(JSON.stringify({ security: e.code, method: request.method, path, ray: request.headers.get('cf-ray') }));
+        }
+        return json({ error: e.code, field: e.field }, e.status);
+      }
       console.error(e.stack || e.message);
       return json({ error: 'server' }, 500);
     }

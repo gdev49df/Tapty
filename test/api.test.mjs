@@ -5,11 +5,12 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, createHmac } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { localConfigs } from './local.mjs';
 import { parseDraft } from '../src/ai.js';
-import { network } from '../src/util.js';
+import { insecure, network } from '../src/util.js';
+import { codeAt, secretBytes } from '../src/totp.js';
 import { sameProduct, signature } from '../src/same.js';
 
 const PORT = 8799;
@@ -755,10 +756,12 @@ try {
     for (const path of ['/', '/search', `/item/${item}`, '/js/app.js', '/api/config', `/p/${photoId}`, '/api/nothing']) {
       const r = await fetch(BASE + path);
       assert.equal(r.headers.get('x-content-type-options'), 'nosniff', path);
-      assert.match(r.headers.get('strict-transport-security') || '', /max-age=31536000/, path);
+      assert.match(r.headers.get('strict-transport-security') || '', /max-age=31536000; includeSubDomains/, path);
       assert.ok(r.headers.get('content-security-policy'), path);
     }
-    assert.match((await fetch(`${BASE}/`)).headers.get('content-security-policy'), /script-src 'self';.*frame-ancestors 'none'/);
+    const csp = (await fetch(`${BASE}/`)).headers.get('content-security-policy');
+    assert.match(csp, /script-src 'self';.*frame-ancestors 'none'/);
+    assert.doesNotMatch(csp, /unsafe/);
     const photo = await fetch(`${BASE}/p/${photoId}?x=1`);
     assert.match(photo.headers.get('content-security-policy'), /sandbox/);
     assert.match(photo.headers.get('cache-control'), /s-maxage=86400/);
@@ -811,6 +814,70 @@ try {
     await start({ ADMIN_KEY: 'секрет-админа' });
     assert.equal((await call('/api/me', { token: stale })).data.user, null);
     assert.equal((await call('/api/me', { token: fresh })).data.user.name, 'Был вчера');
+  });
+
+  await test('изменения с чужих сайтов не принимаются', async () => {
+    const send = (origin) =>
+      call('/api/auth/logout', { token: key(), method: 'POST', headers: { 'cf-connecting-ip': '192.0.2.30', ...(origin && { origin }) } });
+    assert.equal((await send()).status, 200);
+    assert.equal((await send(BASE)).status, 200);
+    assert.equal((await send('https://evil.example')).data.error, 'foreign_origin');
+    assert.equal((await send('null')).status, 403);
+  });
+
+  await test('переход на https только для настоящих адресов', async () => {
+    assert.equal(insecure(new URL('http://tapty.gdev.uk/api/me')), true);
+    for (const ok of ['https://tapty.gdev.uk/', 'http://127.0.0.1:8787/', 'http://localhost/', 'http://[::1]:8787/']) {
+      assert.equal(insecure(new URL(ok)), false, ok);
+    }
+  });
+
+  await test('общий предел запросов с одного адреса', async () => {
+    const send = () => call('/api/config', { headers: { 'cf-connecting-ip': '192.0.2.40' } });
+    const statuses = [];
+    for (let i = 0; i < 13; i++) statuses.push(...(await Promise.all(Array.from({ length: 100 }, send))).map((r) => r.status));
+    assert.equal(statuses[0], 200);
+    assert.ok(statuses.includes(429), 'предел не сработал');
+    assert.equal((await call('/api/config', { headers: { 'cf-connecting-ip': '192.0.2.41' } })).status, 200);
+  });
+
+  await test('коды совпадают с эталонными из RFC 6238', async () => {
+    const secret = secretBytes('GEZD GNBV GY3T QOJQ GEZD GNBV GY3T QOJQ');
+    assert.equal(new TextDecoder().decode(secret), '12345678901234567890');
+    for (const [time, code] of [[59, '287082'], [1111111109, '081804'], [1234567890, '005924'], [2000000000, '279037']]) {
+      assert.equal(await codeAt(secret, Math.floor(time / 30)), code);
+    }
+    assert.equal(secretBytes('короткий'), null);
+  });
+
+  await test('вход в модерацию по коду из приложения', async () => {
+    const secret = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP';
+    await stop();
+    await start({ ADMIN_KEY: 'секрет-админа', ADMIN_TOTP: secret });
+    const headers = { ...adminHeaders, 'cf-connecting-ip': '192.0.2.50' };
+    const open = (code, extra = headers) => call('/api/admin/session', { method: 'POST', body: { code }, headers: extra });
+    const reports = (pass) => call('/api/admin/reports', { headers: { ...headers, ...(pass && { 'x-admin-pass': pass }) } });
+    assert.equal((await reports()).data.error, 'code_required');
+    const code = await codeAt(secretBytes(secret), Math.floor(Date.now() / 30000));
+    // без ключа код бесполезен
+    assert.equal((await open(code, { 'cf-connecting-ip': '192.0.2.51' })).data.error, 'forbidden');
+    const wrong = String((Number(code) + 500000) % 1000000).padStart(6, '0');
+    assert.equal((await open(wrong)).data.error, 'bad_totp');
+    const { pass } = (await open(code)).data;
+    assert.equal((await reports(pass)).status, 200);
+    // один код — один вход
+    assert.equal((await open(code)).data.error, 'bad_totp');
+    // поддельный и просроченный пропуск не годятся
+    assert.equal((await reports(`${pass.slice(0, -1)}${pass.endsWith('0') ? '1' : '0'}`)).data.error, 'code_required');
+    const old = Math.floor(Date.now() / 1000) - 5;
+    const signed = createHmac('sha256', `секрет-админа\n${secret}`).update(`admin-pass:${old}`).digest('hex');
+    assert.equal((await reports(`${old}.${signed}`)).data.error, 'code_required');
+    // пропуск без ключа не работает
+    assert.equal((await call('/api/admin/reports', { headers: { 'x-admin-pass': pass, 'cf-connecting-ip': '192.0.2.52' } })).status, 403);
+    // перебор кодов закрывается общим пределом на все адреса
+    const burst = [];
+    for (let i = 0; i < 32; i++) burst.push((await open(wrong, { ...adminHeaders, 'cf-connecting-ip': `192.0.2.${100 + i}` })).status);
+    assert.equal(burst.at(-1), 429);
   });
 
   console.log(`\nвсе проверки пройдены: ${passed}`);

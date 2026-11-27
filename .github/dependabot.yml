@@ -1,0 +1,7 @@
+# Раз в неделю GitHub проверяет, не вышли ли обновления зависимостей.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly

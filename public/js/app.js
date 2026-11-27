@@ -21,6 +21,11 @@ import { footer } from './footer.js';
 import { promo } from './promo.js';
 import admin from './pages/admin.js';
 
+// Если сайт всё же открылся по http, переходим на защищённый адрес.
+if (location.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) {
+  location.replace(`https:${location.href.slice(5)}`);
+}
+
 const ROUTES = [
   [/^\/$/, home, 'home'],
   [/^\/search$/, search, 'home'],
