@@ -59,8 +59,7 @@ h2 { font-size: 18px; line-height: 1.35; font-weight: 600; }
 .has-footer #view { min-height: 100dvh; padding-bottom: 48px; }
 
 /* ---------- логотип: значок с пакетом и тенге, рядом название ---------- */
-.logo { display: inline-flex; align-items: center; gap: 8px; font-weight: 800; font-size: 24px; letter-spacing: -.045em; line-height: 1; }
-.logo::before { content: ''; width: 1.4em; height: 1.4em; flex: none; background: url('/img/logo.webp') center / contain no-repeat; filter: drop-shadow(0 2px 3px rgba(20, 12, 40, .22)); }
+.logo { display: inline-flex; align-items: center; font-weight: 800; font-size: 24px; letter-spacing: -.045em; line-height: 1; }
 .logo b { color: var(--accent); font-weight: inherit; }
 
 /* ---------- полоса про соцсети ---------- */
