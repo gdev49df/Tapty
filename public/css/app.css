@@ -63,6 +63,17 @@ h2 { font-size: 18px; line-height: 1.35; font-weight: 600; }
 .logo::before { content: ''; width: 1.15em; height: 1.15em; flex: none; background: url('/icons/mark.svg') center / contain no-repeat; }
 .logo b { color: var(--accent); font-weight: inherit; }
 
+/* ---------- полоса про соцсети ---------- */
+#promo { padding: var(--safe-t) 16px 0; background: var(--surface); }
+#promo > div { display: flex; align-items: center; justify-content: center; gap: 16px; max-width: 920px; min-height: 80px; margin: 0 auto; }
+#promo img { flex: none; width: 48px; height: 48px; filter: drop-shadow(0 6px 8px rgba(20, 12, 40, .22)); }
+#promo p { flex: 1; min-width: 0; font-size: 14px; line-height: 1.45; }
+#promo a { color: var(--accent-ink); font-weight: 500; }
+#promo a:hover { text-decoration: underline; }
+#promo button { display: grid; place-items: center; flex: none; width: 40px; height: 40px; margin-right: -8px; border-radius: var(--r); color: var(--muted); }
+#promo button:hover { background: var(--surface-2); color: var(--text); }
+.has-promo #topbar, .has-promo #view { --safe-t: 0px; }
+
 /* ---------- нижнее меню ---------- */
 #tabs { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(5, 1fr); height: calc(var(--tabs) + var(--safe-b)); padding-bottom: var(--safe-b); background: var(--bg); border-top: 1px solid var(--line); }
 .tab { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 11px; font-weight: 500; color: var(--muted); min-width: 0; }
@@ -543,6 +554,9 @@ body[data-page='item'] #toast { bottom: calc(var(--safe-b) + 96px); }
   .v-prev, .v-next { display: grid; }
   body[data-page='chat'] #view { padding-block: 0; }
   .chat { min-height: calc(100dvh - 85px); }
+  #promo > div { min-height: 96px; gap: 24px; }
+  #promo img { width: 64px; height: 64px; }
+  #promo p { flex: 0 1 auto; margin-right: auto; }
   .chat-top { top: 85px; }
   .item-seller { margin: 0; }
   .gallery-wrap { background: none; }

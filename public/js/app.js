@@ -18,6 +18,7 @@ import { closeViewer } from './viewer.js';
 import { paintUnread, refreshUnread } from './unread.js';
 import seller from './pages/seller.js';
 import { footer } from './footer.js';
+import { promo } from './promo.js';
 import admin from './pages/admin.js';
 
 const ROUTES = [
@@ -92,6 +93,8 @@ async function render({ restored = false } = {}) {
   document.title = 'tapty. — объявления по Казахстану';
   document.body.dataset.page = isItem ? 'item' : page === chatPage ? 'chat' : path === '/' ? 'home' : path === '/search' ? 'search' : '';
   chrome(tab);
+  // В переписке полоса выдавила бы поле ввода за экран.
+  promo.update(page !== chatPage && page !== admin);
   // В форме, профиле и модерации подвал только мешает.
   footer.update(![post, me, chats, chatPage, admin].includes(page));
 
