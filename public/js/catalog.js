@@ -3,7 +3,7 @@ export const CATEGORIES = [
   { id: 'phones', ru: 'Телефоны', kk: 'Телефондар', goods: true },
   { id: 'electronics', ru: 'Электроника', kk: 'Электроника', goods: true },
   { id: 'transport', ru: 'Транспорт', kk: 'Көлік', goods: true },
-  { id: 'realty', ru: 'Недвижимость', kk: 'Жылжымайтын мүлік', goods: false },
+  { id: 'realty', ru: 'Недвижимость', kk: 'Мүлік', goods: false },
   { id: 'home_garden', ru: 'Дом и сад', kk: 'Үй және бақша', goods: true },
   { id: 'clothes', ru: 'Одежда', kk: 'Киім', goods: true },
   { id: 'kids', ru: 'Детям', kk: 'Балаларға', goods: true },
