@@ -105,7 +105,10 @@ export default async function itemPage({ root, params, alive, back, go }) {
         <div class="item-info">
           <nav class="crumbs" aria-label="breadcrumb"><a href="/">${esc(t('catalog'))}</a>${icon('next')}<a href="/search?cat=${item.category}&city=">${esc(label(category))}</a></nav>
           ${active ? '' : `<p class="status-note">${esc(t(`st_${item.status}`))}</p>`}
-          <p class="price-tag">${esc(priceText(item))}</p>
+          <div class="price-box">
+            <p class="price-tag">${esc(priceText(item))}</p>
+            ${t(item.priceType) === priceText(item) ? '' : `<span>${esc(t(item.priceType))}</span>`}
+          </div>
           <h1>${esc(item.title)}</h1>
           <p class="meta">${icon('pin')}${esc(place)}</p>
           <p class="meta">${icon('clock')}${esc(dateText(item.createdAt))}</p>
