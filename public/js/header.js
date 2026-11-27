@@ -13,7 +13,7 @@ function draw() {
   drawn = lang();
   root().innerHTML = `
     <div class="head">
-      <a href="/" class="logo"><img src="/img/wordmark.svg" alt="tapty." width="80" height="28"></a>
+      <a href="/" class="logo"><img src="/img/name.svg" alt="tapty." width="82" height="28"></a>
       <form class="searchbar" role="search">
         ${icon('search')}
         <input id="q" type="search" placeholder="${esc(t('searchPlaceholder'))}" aria-label="${esc(t('search'))}" enterkeyhint="search" maxlength="80" autocomplete="off">
