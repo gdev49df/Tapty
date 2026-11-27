@@ -2,7 +2,7 @@
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin
-  Content-Security-Policy: default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; frame-src https://yandex.kz https://yandex.ru https://yandex.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
 
 /sw.js
   Cache-Control: no-cache

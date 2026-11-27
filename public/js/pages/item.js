@@ -1,7 +1,7 @@
 import { api } from '../api.js';
 import { CATEGORIES, REPORT_REASONS } from '../catalog.js';
 import { icon } from '../icons.js';
-import { adsCount, label, t } from '../i18n.js';
+import { adsCount, label, t, viewsCount } from '../i18n.js';
 import { favorites } from '../store.js';
 import { $, $$, cardHtml, cityName, copyText, dateText, emptyState, errorText, esc, initial, money, phoneText, priceText, sheet, sinceText, toast } from '../ui.js';
 
@@ -36,9 +36,11 @@ export default async function itemPage({ root, params, alive, back, go }) {
     item.condition && [t('condition'), t(item.condition)],
     [t('deal'), t(item.priceType)],
     [t('location'), place],
-    [t('published'), dateText(item.createdAt)],
-    [t('views'), item.views],
   ].filter(Boolean);
+  // Номера объявлений начинаются с миллиона.
+  const number = 1_000_000 + id;
+  // Карта ищет место по тексту из объявления: город и то, что продавец написал про район.
+  const mapQuery = `${t('country')}, ${place}`;
 
   root.innerHTML = `
     <article class="item">
@@ -73,22 +75,30 @@ export default async function itemPage({ root, params, alive, back, go }) {
           }
         </div>
         <div class="item-more">
+          ${
+            canWrite
+              ? `<section class="write"><h2>${esc(t('writeSeller'))}</h2>
+                  <p class="muted">${esc(t('messageNote'))}</p>
+                  <form class="write-row">
+                    <input class="input" maxlength="500" autocomplete="off" enterkeyhint="send" aria-label="${esc(t('message'))}" placeholder="${esc(t('messageHint'))}">
+                    <button class="btn" data-send>${esc(t('sendMessage'))}</button>
+                  </form>
+                  <div class="quick">${['q_available', 'q_where', ...(item.priceType === 'bargain' ? ['q_price'] : [])]
+                    .map((k) => `<button type="button" data-quick="${k}">${esc(t(k))}</button>`)
+                    .join('')}</div>
+                </section>`
+              : ''
+          }
           ${item.description ? `<section><h2>${esc(t('description'))}</h2><p class="desc">${esc(item.description)}</p></section>` : ''}
           <section><h2>${esc(t('specs'))}</h2>
             <dl class="specs">${specs.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>
           </section>
-          ${
-            canWrite
-              ? `<section class="write"><h2>${esc(t('writeSeller'))}</h2>
-                  <div class="quick">${['q_available', 'q_where', ...(item.priceType === 'bargain' ? ['q_price'] : [])]
-                    .map((k) => `<button type="button" data-quick="${k}">${esc(t(k))}</button>`)
-                    .join('')}</div>
-                  <textarea class="input" rows="3" maxlength="500" aria-label="${esc(t('message'))}" placeholder="${esc(t('messageHint'))}"></textarea>
-                  <div class="write-foot"><p class="muted small">${esc(t('messageNote'))}</p>
-                  <button type="button" class="btn ghost" data-send>${icon('send')}${esc(t('sendMessage'))}</button></div>
-                </section>`
-              : ''
-          }
+          <section class="item-map"><h2>${esc(t('onMap'))}</h2>
+            <p class="meta">${icon('pin')}${esc(place)}</p>
+            <iframe src="https://yandex.kz/map-widget/v1/?mode=search&amp;z=15&amp;text=${encodeURIComponent(mapQuery)}" title="${esc(t('onMap'))}: ${esc(place)}" loading="lazy" sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox" allowfullscreen></iframe>
+            <a class="link-btn" href="https://2gis.kz/search/${encodeURIComponent(place)}" target="_blank" rel="noopener">${esc(t('open2gis'))}${icon('next')}</a>
+          </section>
+          <p class="item-stamp"><span>№ ${number}</span> · <span>${esc(dateText(item.createdAt))}</span> · <span>${esc(viewsCount(item.views))}</span></p>
         </div>
       </div>
       <div class="col-side">
@@ -212,7 +222,7 @@ export default async function itemPage({ root, params, alive, back, go }) {
 
   const write = $('.write', root);
   if (write) {
-    const field = $('textarea', write);
+    const field = $('input', write);
     const send = $('[data-send]', write);
     write.addEventListener('click', (e) => {
       const key = e.target.closest('[data-quick]')?.dataset.quick;
@@ -220,7 +230,8 @@ export default async function itemPage({ root, params, alive, back, go }) {
       field.value = t(key);
       field.focus();
     });
-    send.onclick = async () => {
+    $('form', write).onsubmit = async (e) => {
+      e.preventDefault();
       const text = field.value.trim();
       if (!text) {
         field.focus();
