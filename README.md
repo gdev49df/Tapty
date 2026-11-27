@@ -36,6 +36,10 @@
 Чтобы перейти на R2: включите R2 в Cloudflare, создайте бакет `tapty-photos`, раскомментируйте `r2_buckets`
 в `wrangler.jsonc`. Новые фото пойдут в R2, старые продолжат открываться.
 
+## Картинки категорий
+
+[Fluent Emoji](https://github.com/microsoft/fluentui-emoji) от Microsoft, лицензия MIT: `public/img/cat/LICENSE.txt`.
+
 ## Локально
 
 ```

@@ -3,7 +3,7 @@ import { CATEGORIES, CONDITIONS, PRICE_TYPES } from '../catalog.js';
 import { icon } from '../icons.js';
 import { label, t } from '../i18n.js';
 import { store } from '../store.js';
-import { $, cityName, cityOptions, emptyState, esc, feed, pick, sheet } from '../ui.js';
+import { $, emptyState, esc, feed, pick, sheet } from '../ui.js';
 
 const KEYS = ['q', 'cat', 'city', 'min', 'max', 'cond', 'type', 'sort'];
 
@@ -18,19 +18,12 @@ export default function search({ root, query, alive, onLeave, go, restored }) {
     { value: 'expensive', label: t('sortExpensive') },
   ];
   const catName = () => label(CATEGORIES.find((c) => c.id === filters.cat)) || t('category');
-  const extra = ['min', 'max', 'cond', 'type'].filter((k) => filters[k]).length;
 
   const chip = (name, text, on) => `<button class="chip" data-chip="${name}" aria-pressed="${Boolean(on)}">${esc(text)}${icon('down')}</button>`;
 
   root.innerHTML = `
     <h1 class="sr-only">${esc(t('search'))}</h1>
-    <form class="searchbar" role="search">
-      ${icon('search')}
-      <input type="search" name="q" value="${esc(filters.q)}" placeholder="${esc(t('searchPlaceholder'))}" aria-label="${esc(t('search'))}" enterkeyhint="search" maxlength="80" autocomplete="off">
-    </form>
     <div class="chips">
-      <button class="chip" data-chip="filters" aria-pressed="${extra > 0}">${icon('sliders')}${esc(t('filters'))}${extra ? ` (${extra})` : ''}</button>
-      ${chip('city', filters.city ? cityName(filters.city) : t('allKz'), filters.city)}
       ${chip('cat', catName(), filters.cat)}
       ${chip('sort', sorts.find((s) => s.value === filters.sort)?.label || t('sortNew'), filters.sort)}
     </div>
@@ -43,7 +36,11 @@ export default function search({ root, query, alive, onLeave, go, restored }) {
   };
   const apply = () => go(url(), { replace: true });
 
-  const input = $('input', root);
+  // Строка поиска и кнопка «Фильтры» живут в общей шапке.
+  const input = $('#q');
+  const filterButton = $('#topbar .filter-btn');
+  if (document.activeElement !== input) input.value = filters.q;
+  else filters.q = input.value.trim();
   let stop = () => {};
   let run = 0;
   const start = (reuse = false) => {
@@ -61,37 +58,41 @@ export default function search({ root, query, alive, onLeave, go, restored }) {
 
   // Результаты обновляются по мере набора, без кнопки «найти».
   let timer;
-  input.addEventListener('input', () => {
+  const onInput = () => {
     clearTimeout(timer);
     timer = setTimeout(() => {
       filters.q = input.value.trim();
       history.replaceState(history.state, '', url());
       start();
     }, 350);
-  });
-  $('form', root).onsubmit = (e) => {
-    e.preventDefault();
-    input.blur();
   };
-  if (!restored && ![...query.keys()].length) input.focus();
+  const onFilters = (e) => {
+    e.preventDefault();
+    openFilters();
+  };
+  input.addEventListener('input', onInput);
+  filterButton.addEventListener('click', onFilters);
   onLeave(() => {
     clearTimeout(timer);
     stop();
+    input.removeEventListener('input', onInput);
+    filterButton.removeEventListener('click', onFilters);
   });
+  if (query.has('filters')) {
+    history.replaceState(history.state, '', url());
+    openFilters();
+  } else if (!restored && ![...query.keys()].length) input.focus();
 
   $('.chips', root).addEventListener('click', async (e) => {
     const name = e.target.closest('[data-chip]')?.dataset.chip;
     if (!name) return;
-    if (name === 'filters') return openFilters();
     const lists = {
-      city: [t('city'), [{ value: '', label: t('allKz') }, ...cityOptions()]],
       cat: [t('category'), [{ value: '', label: t('all') }, ...CATEGORIES.map((c) => ({ value: c.id, label: label(c) }))]],
       sort: [t('sort'), sorts],
     };
     const value = await pick(lists[name][0], lists[name][1], filters[name]);
     if (value === undefined) return;
     filters[name] = value;
-    if (name === 'city') store.set('city', value);
     apply();
   });
 

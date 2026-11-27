@@ -6,7 +6,7 @@ import { deleteOrphans, deletePhotos } from './photos.js';
 
 const PAGE = 20;
 const HIDE_AFTER_REPORTS = 5;
-const CARD = 'id, title, price, price_type, city, photos, status, expires_at';
+const CARD = 'id, title, price, price_type, city, district, condition, photos, bumped_at';
 
 const parsePhotos = (row) => {
   try {
@@ -22,6 +22,9 @@ const card = (row) => ({
   price: row.price,
   priceType: row.price_type,
   city: row.city,
+  district: row.district,
+  condition: row.condition,
+  bumpedAt: row.bumped_at,
   photo: parsePhotos(row)[0] || null,
 });
 
@@ -31,15 +34,12 @@ const publicStatus = (row) =>
 const detail = (row) => ({
   ...card(row),
   description: row.description,
-  condition: row.condition,
   category: row.category,
-  district: row.district,
   name: row.name,
   photos: parsePhotos(row),
   status: publicStatus(row),
   views: row.views,
   createdAt: row.created_at,
-  bumpedAt: row.bumped_at,
   expiresAt: row.expires_at,
 });
 

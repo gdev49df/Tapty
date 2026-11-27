@@ -1,6 +1,7 @@
-import { icon } from './icons.js';
 import { lang, t } from './i18n.js';
 import { favorites } from './store.js';
+import { header } from './header.js';
+import { icon } from './icons.js';
 import { $, closeSheet, esc, toast } from './ui.js';
 import home from './pages/home.js';
 import search from './pages/search.js';
@@ -58,14 +59,7 @@ function chrome(tab) {
         `<a href="${href}" class="tab tab-${id}"${id === tab ? ' aria-current="page"' : ''}><span>${icon(ic)}</span>${esc(name[id])}</a>`
     )
     .join('');
-  $('#topbar').innerHTML = `
-    <div class="topbar-in">
-      <a href="/" class="logo">Tapty</a>
-      <nav>${tabs
-        .slice(1)
-        .map(([id, href]) => `<a href="${href}" class="top-${id}"${id === tab ? ' aria-current="page"' : ''}>${esc(id === 'new' ? t('postAd') : name[id])}</a>`)
-        .join('')}</nav>
-    </div>`;
+  header.update(tab);
 }
 
 async function render({ restored = false } = {}) {
@@ -82,7 +76,7 @@ async function render({ restored = false } = {}) {
 
   document.documentElement.lang = lang();
   document.title = 'Tapty — объявления по Казахстану';
-  document.body.dataset.page = isItem ? 'item' : path === '/' ? 'home' : '';
+  document.body.dataset.page = isItem ? 'item' : path === '/' ? 'home' : path === '/search' ? 'search' : '';
   chrome(tab);
 
   view.innerHTML = '';
@@ -115,6 +109,8 @@ document.addEventListener('click', (e) => {
   e.preventDefault();
   go(link.getAttribute('href'));
 });
+
+header.init({ go, rerender: () => render() });
 
 history.scrollRestoration = 'manual';
 history.replaceState({ key, depth }, '');

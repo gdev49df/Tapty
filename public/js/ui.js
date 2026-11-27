@@ -19,14 +19,19 @@ export function priceText(item) {
 
 export const cityName = (id) => label(CITIES.find((c) => c.id === id));
 
+const MONTHS = {
+  ru: ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'],
+  kk: ['қаңтар', 'ақпан', 'наурыз', 'сәуір', 'мамыр', 'маусым', 'шілде', 'тамыз', 'қыркүйек', 'қазан', 'қараша', 'желтоқсан'],
+};
+
 export function dateText(seconds) {
   const date = new Date(seconds * 1000);
   const days = Math.round((new Date().setHours(0, 0, 0, 0) - new Date(date).setHours(0, 0, 0, 0)) / 86400000);
   if (days === 0) return t('today');
   if (days === 1) return t('yesterday');
-  const d = String(date.getDate()).padStart(2, '0');
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  return `${d}.${m}.${date.getFullYear()}`;
+  if (days > 1 && days < 7) return `${days} ${t('daysAgo')}`;
+  const year = date.getFullYear() === new Date().getFullYear() ? '' : ` ${date.getFullYear()}`;
+  return `${date.getDate()} ${MONTHS[lang()][date.getMonth()]}${year}`;
 }
 
 export const phoneText = (p) => `+${p[0]} ${p.slice(1, 4)} ${p.slice(4, 7)} ${p.slice(7, 9)} ${p.slice(9)}`;
@@ -127,22 +132,26 @@ export const cityOptions = () =>
 
 export function cardHtml(item) {
   const on = favorites.has(item.id);
+  const place = [cityName(item.city), item.district].filter(Boolean).join(', ');
   return `
     <article class="card">
-      <a href="/item/${item.id}">
-        <span class="card-photo">${
-          item.photo
-            ? `<img src="/p/${item.photo}/t" alt="" loading="lazy" decoding="async">`
-            : icon('camera', 'ph')
-        }</span>
-        <span class="card-title">${esc(item.title)}</span>
-        <span class="card-price">${esc(priceText(item))}</span>
-      </a>
-      <button class="heart" data-fav="${item.id}" aria-pressed="${on}" aria-label="${esc(t(on ? 'fromFav' : 'toFav'))}">${icon('heart')}</button>
+      <span class="card-photo">${
+        item.photo
+          ? `<img src="/p/${item.photo}/t" alt="" loading="lazy" decoding="async">`
+          : icon('camera', 'ph')
+      }</span>
+      <div class="card-head">
+        <h3><a href="/item/${item.id}">${esc(item.title)}</a></h3>
+        <button class="heart" data-fav="${item.id}" aria-pressed="${on}" aria-label="${esc(t(on ? 'fromFav' : 'toFav'))}">${icon('heart')}</button>
+      </div>
+      <p class="card-price">${esc(priceText(item))}</p>
+      <p class="card-meta card-date">${icon('clock')}<span>${esc(dateText(item.bumpedAt))}</span></p>
+      <p class="card-meta card-place">${icon('pin')}<span>${esc(place)}</span></p>
+      ${item.condition ? `<p class="card-cond">${esc(t('state'))}: ${esc(t(item.condition))}</p>` : ''}
     </article>`;
 }
 
-export const skeleton = (n = 6) =>
+export const skeleton = (n = 10) =>
   Array.from({ length: n }, () => '<div class="card skel" aria-hidden="true"><span class="card-photo"></span><span></span><span></span></div>').join('');
 
 export function emptyState(title, hint, action = '') {
