@@ -935,6 +935,129 @@ try {
     assert.equal(retry.data.error, 'banned');
   });
 
+  // Отдельный адрес, чтобы не упереться в пределы предыдущих проверок.
+  const as = (ip) => (path, token, body, method = body ? 'POST' : 'GET') => call(path, { token, method, body, headers: { 'cf-connecting-ip': ip } });
+
+  await test('предложенную цену принимает или отклоняет только продавец, один раз', async () => {
+    const req = as('203.0.113.70');
+    const [owner, guest, other] = await Promise.all(['Хозяин', 'Торговец', 'Лишний'].map((name) => signUp(name, { ip: '203.0.113.70' })));
+    const goods = await create(owner, { title: 'Самокат', phone: '77070000001', price: 50000 });
+    const firm = await create(owner, { title: 'Шлем', phone: '77070000001', price: 9000, priceType: 'fixed' });
+    const offer = (sum, id = goods) => req(`/api/listings/${id}/chat`, guest, { offer: sum });
+    for (const bad of [0, -5, 1.5, '40000', null, 1e12]) assert.equal((await offer(bad)).status, 400, String(bad));
+    assert.equal((await offer(8000, firm)).data.error, 'no_offer');
+    const chat = (await offer(40000)).data.chat;
+    const open = async (token) => (await req(`/api/chats/${chat}`, token)).data;
+    const first = (await open(owner)).messages[0];
+    assert.deepEqual([first.kind, first.amount, first.state, first.mine], ['offer', 40000, '', false]);
+    assert.equal((await req('/api/chats', owner)).data.items[0].lastKind, 'offer');
+    const answer = (token, id, accept) => req(`/api/chats/${chat}/offers/${id}`, token, { accept });
+    assert.equal((await answer(guest, first.id, true)).status, 403);
+    assert.equal((await answer(other, first.id, true)).status, 404);
+    assert.equal((await answer(owner, first.id, 'yes')).status, 400);
+    // новое предложение закрывает прежнее
+    await offer(45000);
+    const second = (await open(owner)).messages.at(-1);
+    assert.equal((await answer(owner, first.id, true)).data.error, 'offer_closed');
+    assert.equal((await open(owner)).offers.find((o) => o.id === first.id).state, 'replaced');
+    const both = await Promise.all([answer(owner, second.id, true), answer(owner, second.id, false)]);
+    assert.deepEqual(both.map((r) => r.status).sort(), [201, 409]);
+    const done = both.find((r) => r.status === 201).data.message;
+    assert.equal(done.amount, 45000);
+    assert.ok(['accepted', 'declined'].includes(done.kind));
+    const seen = await open(guest);
+    assert.equal(seen.offers.find((o) => o.id === second.id).state, done.kind);
+    assert.equal(seen.messages.at(-1).kind, done.kind);
+    // обычным сообщением предложение не подделать
+    await req(`/api/chats/${chat}`, guest, { text: 'Предлагаю 1 ₸', kind: 'offer', amount: 1 });
+    assert.equal((await open(owner)).messages.at(-1).kind, '');
+    // цена в объявлении не меняется
+    assert.equal((await req(`/api/listings/${goods}`, guest)).data.item.price, 50000);
+    await offer(48000);
+    const third = (await open(owner)).messages.at(-1);
+    await req(`/api/listings/${goods}/status`, owner, { action: 'sold' });
+    assert.equal((await answer(owner, third.id, true)).data.error, 'not_active');
+    assert.equal((await offer(49000)).data.error, 'not_active');
+  });
+
+  await test('голосовое: только участникам, с согласием, настоящая запись не длиннее минуты', async () => {
+    const ip = '203.0.113.71';
+    const req = as(ip);
+    const [owner, guest, other] = await Promise.all([
+      signUp('Голос продавца', { ip, login: 'voice_owner' }), signUp('Голос покупателя', { ip, login: 'voice_guest' }), signUp('Чужой', { ip }),
+    ]);
+    const goods = await create(owner, { title: 'Колонка', phone: '77070000002', price: 15000 });
+    const chat = (await req(`/api/listings/${goods}/chat`, guest, { text: 'Здравствуйте' })).data.chat;
+    const webm = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    const mp4 = new Uint8Array([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 0x4d, 0x34, 0x41, 0x20, 0, 0, 0, 0]);
+    const send = (token, bytes = webm, seconds = 5) => {
+      const body = new FormData();
+      body.set('voice', new Blob([bytes], { type: 'audio/webm' }), 'voice');
+      body.set('seconds', String(seconds));
+      return req(`/api/chats/${chat}/voice`, token, body);
+    };
+    for (const seconds of [0, 61, 1.5, 'x']) assert.equal((await send(guest, webm, seconds)).data.error, 'bad_voice', String(seconds));
+    assert.equal((await send(guest, new TextEncoder().encode('<script>alert(1)</script>'))).data.error, 'bad_voice');
+    assert.equal((await send(guest, jpeg)).data.error, 'bad_voice');
+    assert.equal((await send(guest, new Uint8Array(1_520_000).fill(1))).status, 413);
+    assert.equal((await send(other)).status, 404);
+    const sent = await send(guest);
+    assert.equal(sent.status, 201, JSON.stringify(sent.data));
+    const { voice, seconds } = sent.data.message;
+    assert.equal(seconds, 5);
+    assert.equal((await req('/api/chats', owner)).data.items[0].lastVoice, true);
+    const get = (token, path = `/api/chats/${chat}/photos/${voice}`) => fetch(BASE + path, { headers: { authorization: `Bearer ${token}` } });
+    const heard = await get(owner);
+    assert.equal(heard.status, 200);
+    assert.equal(heard.headers.get('content-type'), 'audio/webm');
+    assert.match(heard.headers.get('cache-control'), /private/);
+    assert.deepEqual(new Uint8Array(await heard.arrayBuffer()), webm);
+    assert.equal((await get(other)).status, 404);
+    assert.equal((await get(owner, `/p/${voice}`)).status, 404);
+    assert.equal((await send(owner, mp4, 60)).status, 201);
+    const attach = await call('/api/listings', { token: guest, method: 'POST', body: listing({ phone: '77070000003', photos: [voice] }) });
+    assert.equal(attach.data.error, 'photos_lost');
+    // модератору запись доступна только после жалобы
+    assert.equal((await call(`/api/admin/chat-photos/${voice}`, { headers: adminHeaders })).status, 404);
+    await req(`/api/chats/${chat}/complaint`, owner, { reason: 'spam' });
+    const queue = (await call('/api/admin/complaints', { headers: adminHeaders })).data.items;
+    assert.ok(queue.some((c) => c.messages.some((m) => m.voice === voice && m.seconds === 5)));
+    assert.equal((await call(`/api/admin/chat-photos/${voice}`, { headers: adminHeaders })).status, 200);
+    await req(`/api/chats/${chat}/block`, owner, {});
+    assert.equal((await send(guest)).data.error, 'blocked');
+    await req(`/api/chats/${chat}/block`, owner, undefined, 'DELETE');
+    // аккаунт, принявший прежнюю редакцию, сначала принимает новую
+    await stop();
+    runSql("UPDATE users SET consent_version = '2026-11-27' WHERE login = 'voice_guest'");
+    await start({ ADMIN_KEY: 'секрет-админа' });
+    assert.equal((await req(`/api/chats/${chat}`, guest)).data.chat.needConsent, true);
+    assert.equal((await send(guest)).data.error, 'consent_needed');
+    assert.equal((await req('/api/auth/consent', guest, { consent: '2026-11-27' })).data.error, 'consent');
+    assert.equal((await req('/api/auth/consent', key(), { consent: LEGAL_VERSION })).status, 401);
+    assert.equal((await req('/api/auth/consent', guest, { consent: LEGAL_VERSION })).status, 200);
+    assert.equal((await req(`/api/chats/${chat}`, guest)).data.chat.needConsent, false);
+    assert.equal((await send(guest)).status, 201);
+  });
+
+  await test('статистика видна только продавцу и не накручивается им самим', async () => {
+    const ip = '203.0.113.72';
+    const owner = await signUp('Статистик', { ip });
+    const fan = await signUp('Поклонник', { ip });
+    const goods = await create(owner, { title: 'Палатка', phone: '77070000004', price: 25000 });
+    const mine = async () => (await call('/api/mine', { token: owner })).data.items.find((i) => i.id === goods);
+    assert.deepEqual([(await mine()).views, (await mine()).favs, (await mine()).contacts], [0, 0, 0]);
+    const open = (token, from) => as(from)(`/api/listings/${goods}/contact`, token, {});
+    assert.equal((await open(owner, '203.0.113.73')).status, 200);
+    await open(fan, '203.0.113.74');
+    await open(fan, '203.0.113.74');
+    await open(key(), '203.0.113.75');
+    for (const token of [owner, fan]) await call(`/api/favorites/${goods}`, { token, method: 'PUT' });
+    const stats = await mine();
+    assert.deepEqual([stats.favs, stats.contacts], [1, 2]);
+    const open_ = (await call(`/api/listings/${goods}`, { token: fan })).data.item;
+    assert.ok(!('contacts' in open_) && !('favs' in open_));
+  });
+
   await test('изменения с чужих сайтов не принимаются', async () => {
     const send = (origin) =>
       call('/api/auth/logout', { token: key(), method: 'POST', headers: { 'cf-connecting-ip': '192.0.2.30', ...(origin && { origin }) } });

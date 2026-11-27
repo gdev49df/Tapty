@@ -24,7 +24,8 @@ const STATEMENTS = [
     bumped_at INTEGER NOT NULL,
     expires_at INTEGER NOT NULL,
     old_price INTEGER NOT NULL DEFAULT 0,
-    area TEXT NOT NULL DEFAULT ''
+    area TEXT NOT NULL DEFAULT '',
+    contacts INTEGER NOT NULL DEFAULT 0
   )`,
   `CREATE INDEX IF NOT EXISTS listings_feed ON listings (status, bumped_at DESC)`,
   `CREATE INDEX IF NOT EXISTS listings_city ON listings (status, city, bumped_at DESC)`,
@@ -74,7 +75,12 @@ const STATEMENTS = [
     sender TEXT NOT NULL,
     text TEXT NOT NULL,
     created_at INTEGER NOT NULL,
-    photo TEXT NOT NULL DEFAULT ''
+    photo TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL DEFAULT '',
+    amount INTEGER NOT NULL DEFAULT 0,
+    state TEXT NOT NULL DEFAULT '',
+    voice TEXT NOT NULL DEFAULT '',
+    seconds INTEGER NOT NULL DEFAULT 0
   )`,
   `CREATE INDEX IF NOT EXISTS messages_chat ON messages (chat_id, id)`,
   `CREATE TABLE IF NOT EXISTS reviews (
@@ -86,6 +92,7 @@ const STATEMENTS = [
     PRIMARY KEY (seller, author)
   )`,
   `CREATE TABLE IF NOT EXISTS favorites (user_id TEXT NOT NULL, listing_id INTEGER NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (user_id, listing_id))`,
+  `CREATE INDEX IF NOT EXISTS favorites_listing ON favorites (listing_id)`,
   `CREATE TABLE IF NOT EXISTS blocks (blocker TEXT NOT NULL, blocked TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (blocker, blocked))`,
   // Жалоба на собеседника: модератор видит переписку, пока жалоба не разобрана.
   `CREATE TABLE IF NOT EXISTS complaints (
@@ -103,7 +110,7 @@ const STATEMENTS = [
 
 // Столбцы, которых нет в базах, созданных прежними версиями сайта.
 const COLUMNS = {
-  listings: { old_price: 'INTEGER NOT NULL DEFAULT 0', area: "TEXT NOT NULL DEFAULT ''" },
+  listings: { old_price: 'INTEGER NOT NULL DEFAULT 0', area: "TEXT NOT NULL DEFAULT ''", contacts: 'INTEGER NOT NULL DEFAULT 0' },
   users: {
     login: 'TEXT', pass_hash: 'TEXT', pass_salt: 'TEXT', rec_hash: 'TEXT', rec_salt: 'TEXT',
     // когда и какую редакцию оферты и согласия человек принял; у старых аккаунтов пусто
@@ -117,7 +124,15 @@ const COLUMNS = {
     buyer_cleared: 'INTEGER NOT NULL DEFAULT 0',
     seller_cleared: 'INTEGER NOT NULL DEFAULT 0',
   },
-  messages: { photo: "TEXT NOT NULL DEFAULT ''" },
+  // kind: '' — обычное, offer — предложенная цена (amount, state), accepted и declined — ответ на неё
+  messages: {
+    photo: "TEXT NOT NULL DEFAULT ''",
+    kind: "TEXT NOT NULL DEFAULT ''",
+    amount: 'INTEGER NOT NULL DEFAULT 0',
+    state: "TEXT NOT NULL DEFAULT ''",
+    voice: "TEXT NOT NULL DEFAULT ''",
+    seconds: 'INTEGER NOT NULL DEFAULT 0',
+  },
 };
 
 async function migrate(env) {

@@ -82,9 +82,11 @@ export default async function me({ root, alive, rerender }) {
           <a href="/item/${i.id}" class="my-main">
             <span class="my-photo">${i.photo ? `<img src="/p/${i.photo}/t" alt="" loading="lazy">` : icon('camera')}</span>
             <span><strong>${esc(i.title)}</strong><b>${esc(priceText(i))}</b>
-              <small class="st-${i.status}">${esc(state)}</small>
-              <small>${icon('eye')}${i.views}</small></span>
+              <small class="st-${i.status}">${esc(state)}</small></span>
           </a>
+          <dl class="my-stats">${[['eye', 'statViews', i.views], ['heart', 'statFavs', i.favs], ['phone', 'statContacts', i.contacts]]
+            .map(([ic, key, n]) => `<div><dt>${esc(t(key))}</dt><dd>${icon(ic)}${n}</dd></div>`)
+            .join('')}</dl>
           <div class="my-actions">${actions.join('')}</div>
         </article>`;
       })

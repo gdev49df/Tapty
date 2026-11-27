@@ -111,7 +111,11 @@ export default function admin({ root, alive }) {
                 <details><summary>Переписка</summary><ul class="log">${c.messages
                   .map(
                     (m) => `<li${m.accused ? ' class="accused"' : ''}><b>${esc(m.accused ? c.accused : c.author)}:</b> ${
-                      m.photo ? `<button type="button" class="btn small ghost" data-shot="${esc(m.photo)}">Показать фото</button>` : esc(m.text)
+                      m.photo
+                        ? `<button type="button" class="btn small ghost" data-shot="${esc(m.photo)}">Показать фото</button>`
+                        : m.voice
+                        ? `<button type="button" class="btn small ghost" data-sound="${esc(m.voice)}">Прослушать голосовое, ${m.seconds} с</button>`
+                        : esc(m.text)
                     }</li>`
                   )
                   .join('')}</ul></details>
@@ -128,8 +132,16 @@ export default function admin({ root, alive }) {
 
   complaintBox.addEventListener('click', async (e) => {
     const shot = e.target.closest('[data-shot]');
+    const sound = e.target.closest('[data-sound]');
     const btn = e.target.closest('[data-complaint]');
     try {
+      if (sound) {
+        sound.disabled = true;
+        const audio = new Audio(URL.createObjectURL(await apiBlob(`/admin/chat-photos/${sound.dataset.sound}`, { headers: headers() })));
+        audio.controls = true;
+        sound.replaceWith(audio);
+        audio.play().catch(() => {});
+      }
       if (shot) {
         const url = URL.createObjectURL(await apiBlob(`/admin/chat-photos/${shot.dataset.shot}`, { headers: headers() }));
         const img = new Image();

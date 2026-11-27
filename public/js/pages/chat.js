@@ -1,7 +1,7 @@
 // Один диалог. Новые сообщения подтягиваются раз в несколько секунд, пока страница открыта.
 import { api, apiBlob, auth } from '../api.js';
-import { authForm } from '../auth.js';
-import { CHAT_REASONS } from '../catalog.js';
+import { authForm, consentSheet } from '../auth.js';
+import { CHAT_REASONS, LIMITS } from '../catalog.js';
 import { compress } from '../images.js';
 import { icon } from '../icons.js';
 import { t } from '../i18n.js';
@@ -9,7 +9,8 @@ import { askDeleteChat } from '../dialogs.js';
 import { reviewForm } from '../reviews.js';
 import { refreshUnread } from '../unread.js';
 import { openViewer } from '../viewer.js';
-import { $, $$, dateText, emptyState, errorText, esc, priceText, sheet, timeText, toast } from '../ui.js';
+import { canRecord, clock, createPlayer, startRecording, voiceHtml } from '../voice.js';
+import { $, $$, dateText, emptyState, errorText, esc, money, priceText, priceWords, sheet, timeText, toast } from '../ui.js';
 
 const EVERY = 4000;
 const AT_ONCE = 4; // столько фото можно отправить за один раз
@@ -41,7 +42,7 @@ export default async function chatPage({ root, params, alive, back, go, rerender
   }
   if (!alive()) return;
 
-  let { chat, read, messages } = data;
+  let { chat, read, messages, offers } = data;
   const { listing } = chat;
   const gone = listing.status === 'gone';
   const subtitle = gone ? t('listingGone') : listing.status === 'active' ? priceText(listing) : t(`st_${listing.status}`);
@@ -61,8 +62,15 @@ export default async function chatPage({ root, params, alive, back, go, rerender
         <button type="button" class="attach" aria-label="${esc(t('attachPhoto'))}">${icon('camera')}</button>
         <input type="file" accept="image/*" multiple hidden>
         <textarea class="input" rows="1" maxlength="1000" enterkeyhint="send" aria-label="${esc(t('chatInput'))}" placeholder="${esc(t('chatInput'))}"></textarea>
-        <button class="btn" aria-label="${esc(t('sendMessage'))}">${icon('send')}</button>
+        <button type="button" class="btn" data-mic aria-label="${esc(t('voiceRecord'))}">${icon('mic')}</button>
+        <button class="btn" data-send aria-label="${esc(t('sendMessage'))}">${icon('send')}</button>
       </form>
+      <div class="recorder" hidden>
+        <button type="button" class="icon-btn" data-drop aria-label="${esc(t('voiceCancel'))}">${icon('trash')}</button>
+        <p role="status"><i></i><span></span></p>
+        <time></time>
+        <button type="button" class="btn" data-voice-send aria-label="${esc(t('sendMessage'))}">${icon('send')}</button>
+      </div>
     </div>`;
   $('[data-back]', root).onclick = back;
   const list = $('.messages', root);
@@ -85,6 +93,30 @@ export default async function chatPage({ root, params, alive, back, go, rerender
     return pictures.get(name);
   };
 
+  // Предложенная цена: продавец отвечает одной кнопкой, пока объявление действует.
+  function offerHtml(m) {
+    const answerable = !m.mine && !chat.buying && !m.state && chat.canWrite && chat.listing.status === 'active';
+    const status = { accepted: 'offerAccepted', declined: 'offerDeclined', replaced: 'offerReplaced' }[m.state] || 'offerWait';
+    return `<div class="offer" data-state="${esc(m.state)}">
+      <span>${esc(t('offerLabel'))}</span><strong>${esc(money(m.amount))}</strong>
+      ${
+        answerable
+          ? `<div class="row">
+              <button type="button" class="btn small ghost" data-answer="decline" data-id="${m.id}">${esc(t('decline'))}</button>
+              <button type="button" class="btn small" data-answer="accept" data-id="${m.id}">${esc(t('accept'))}</button>
+            </div>`
+          : `<em>${esc(t(status))}</em>`
+      }
+    </div>`;
+  }
+
+  const bodyHtml = (m) => {
+    if (m.photo) return `<button type="button" class="msg-photo" data-photo="${esc(m.photo)}" aria-label="${esc(t('openPhoto'))}"><img alt="${esc(t('photoMessage'))}"></button>`;
+    if (m.voice) return voiceHtml(m);
+    if (m.kind === 'offer') return offerHtml(m);
+    return `<p>${esc(m.kind ? priceWords(m.kind, m.amount) : m.text)}</p>`;
+  };
+
   function draw() {
     let day = '';
     const lastMine = [...messages].reverse().find((m) => m.mine);
@@ -94,12 +126,10 @@ export default async function chatPage({ root, params, alive, back, go, rerender
         const divider = date === day ? '' : `<p class="day">${esc(date)}</p>`;
         day = date;
         const state = m === lastMine ? `, ${t(m.id <= read ? 'read' : 'sent').toLowerCase()}` : '';
-        const body = m.photo
-          ? `<button type="button" class="msg-photo" data-photo="${esc(m.photo)}" aria-label="${esc(t('openPhoto'))}"><img alt="${esc(t('photoMessage'))}"></button>`
-          : `<p>${esc(m.text)}</p>`;
-        return `${divider}<div class="msg${m.mine ? ' mine' : ''}">${body}<small>${esc(timeText(m.at) + state)}</small></div>`;
+        return `${divider}<div class="msg${m.mine ? ' mine' : ''}">${bodyHtml(m)}<small>${esc(timeText(m.at) + state)}</small></div>`;
       })
       .join('');
+    player.paint();
     $$('[data-photo]', list).forEach(async (button) => {
       try {
         const url = await picture(button.dataset.photo, '/t');
@@ -111,6 +141,8 @@ export default async function chatPage({ root, params, alive, back, go, rerender
   }
 
   list.addEventListener('click', async (e) => {
+    const reply = e.target.closest('[data-answer]');
+    if (reply) return answer(reply);
     const button = e.target.closest('[data-photo]');
     if (!button) return;
     try {
@@ -121,11 +153,32 @@ export default async function chatPage({ root, params, alive, back, go, rerender
     }
   });
 
+  async function answer(button) {
+    const buttons = $$('button', button.parentElement);
+    buttons.forEach((b) => (b.disabled = true));
+    try {
+      const { message } = await api(`/chats/${id}/offers/${button.dataset.id}`, { method: 'POST', body: { accept: button.dataset.answer === 'accept' } });
+      if (!alive()) return;
+      const offer = messages.find((m) => m.id === Number(button.dataset.id));
+      if (offer) offer.state = message.kind;
+      add([message]);
+      draw();
+      toEnd();
+    } catch (err) {
+      if (!alive()) return;
+      if (err.code === 'login_required') return login();
+      toast(errorText(err));
+      buttons.forEach((b) => (b.disabled = false));
+      poll();
+    }
+  }
+
   // Вместо поля ввода — объяснение, почему написать нельзя.
   function drawState() {
     const box = $('.chat-closed', root);
     box.hidden = chat.canWrite;
-    form.hidden = !chat.canWrite;
+    if (!chat.canWrite) dropRecording();
+    form.hidden = !chat.canWrite || Boolean(recording);
     box.innerHTML = chat.canWrite
       ? ''
       : `<p>${esc(t(chat.blockedByMe ? 'youBlocked' : 'err_blocked'))}</p>${
@@ -253,9 +306,125 @@ export default async function chatPage({ root, params, alive, back, go, rerender
     return added.length;
   }
 
+  const mic = $('[data-mic]', form);
+  const send = $('[data-send]', form);
+  const bar = $('.recorder', root);
+  let recording = null; // { recorder, result }
+  let starting = false;
+  const player = createPlayer(list, (voice) => picture(voice), (err) => alive() && toast(err.code ? errorText(err) : t('voiceNoPlay')));
+  onLeave(() => {
+    player.pause();
+    dropRecording();
+  });
+
+  // Пока в поле пусто, на месте отправки — микрофон.
+  const chooseButton = () => {
+    mic.hidden = !canRecord() || Boolean(input.value.trim());
+    send.hidden = !mic.hidden;
+  };
+
+  function showRecorder(on) {
+    bar.hidden = !on;
+    form.hidden = on || !chat.canWrite;
+  }
+
+  function dropRecording() {
+    const old = recording;
+    recording = null;
+    old?.recorder?.stop();
+    if (old && alive()) showRecorder(false);
+  }
+
+  async function record() {
+    if (starting || recording) return;
+    starting = true;
+    player.pause();
+    const mine = { recorder: null };
+    const status = (key) => ($('p span', bar).textContent = t(key));
+    const time = (seconds) => ($('time', bar).textContent = `${clock(seconds)} / ${clock(LIMITS.voiceSeconds)}`);
+    try {
+      const recorder = await startRecording({
+        onTick: (seconds) => recording === mine && time(seconds),
+        onEnd: () => {
+          if (recording !== mine) return;
+          bar.classList.add('ready');
+          status('voiceReady');
+        },
+      });
+      // пока спрашивали разрешение, могли уйти из диалога
+      if (!alive() || !chat.canWrite) return recorder.stop();
+      mine.recorder = recorder;
+      recording = mine;
+      bar.classList.remove('ready');
+      status('voiceRecording');
+      time(0);
+      showRecorder(true);
+      $('[data-voice-send]', bar).focus({ preventScroll: true });
+    } catch (e) {
+      if (alive()) toast(t({ NotAllowedError: 'micDenied', SecurityError: 'micDenied', NotFoundError: 'micMissing' }[e.name] || 'voiceFailed'));
+    } finally {
+      starting = false;
+    }
+  }
+  mic.onclick = () => {
+    if (!chat.needConsent) return record();
+    consentSheet(() => {
+      chat.needConsent = false;
+      record();
+    });
+  };
+  $('[data-drop]', bar).onclick = () => {
+    dropRecording();
+    mic.focus({ preventScroll: true });
+  };
+  $('[data-voice-send]', bar).onclick = async (e) => {
+    const button = e.currentTarget;
+    const mine = recording;
+    if (!mine || button.disabled) return;
+    const drop = $('[data-drop]', bar);
+    // пока запись отправляется, удалить её уже нельзя
+    button.disabled = drop.disabled = true;
+    try {
+      const { blob, seconds } = await mine.recorder.stop();
+      if (!blob.size) {
+        dropRecording();
+        toast(t('voiceFailed'));
+      } else {
+        const body = new FormData();
+        body.set('voice', blob, 'voice');
+        body.set('seconds', seconds);
+        const { message } = await api(`/chats/${id}/voice`, { method: 'POST', body });
+        if (!alive()) return;
+        // своя запись уже есть в памяти
+        pictures.set(message.voice, Promise.resolve(URL.createObjectURL(blob)));
+        if (recording === mine) {
+          recording = null;
+          showRecorder(false);
+        }
+        add([message]);
+        draw();
+        toEnd();
+      }
+    } catch (err) {
+      if (!alive()) return;
+      if (err.code === 'login_required') return login();
+      // запись остаётся: можно отправить ещё раз
+      if (err.code === 'consent_needed') consentSheet(() => (chat.needConsent = false));
+      else toast(errorText(err));
+      if (err.code === 'blocked' || err.code === 'you_blocked') poll();
+    } finally {
+      button.disabled = drop.disabled = false;
+    }
+  };
+  // Свернули приложение — запись останавливается, микрофон не остаётся включённым.
+  const hidden = () => document.visibilityState === 'hidden' && recording?.recorder.stop();
+  document.addEventListener('visibilitychange', hidden);
+  onLeave(() => document.removeEventListener('visibilitychange', hidden));
+
   draw();
   drawReview();
   drawState();
+  chooseButton();
   // Роутер после отрисовки прокручивает наверх, поэтому к последнему сообщению переходим кадром позже.
   requestAnimationFrame(() => alive() && toEnd());
   refreshUnread();
@@ -280,9 +449,14 @@ export default async function chatPage({ root, params, alive, back, go, rerender
         read = next.read;
         const reviewChanged = JSON.stringify([next.chat.canReview, next.chat.review]) !== JSON.stringify([chat.canReview, chat.review]);
         const stateChanged = next.chat.canWrite !== chat.canWrite || next.chat.blockedByMe !== chat.blockedByMe;
+        // от этого зависят кнопки под предложенной ценой
+        const answersChanged = next.chat.listing.status !== chat.listing.status || JSON.stringify(next.offers) !== JSON.stringify(offers);
         chat = next.chat;
+        offers = next.offers;
+        const states = new Map(offers.map((o) => [o.id, o.state]));
+        for (const m of messages) if (states.has(m.id)) m.state = states.get(m.id);
         if (stateChanged) drawState();
-        if (changed) draw();
+        if (changed || stateChanged || answersChanged) draw();
         if (reviewChanged) drawReview();
         if (added && stick) toEnd();
         if (added) refreshUnread();
@@ -302,6 +476,7 @@ export default async function chatPage({ root, params, alive, back, go, rerender
   const resize = () => {
     input.style.height = 'auto';
     input.style.height = `${Math.min(input.scrollHeight + 2, 140)}px`;
+    chooseButton();
   };
   input.addEventListener('input', resize);
   input.addEventListener('keydown', (e) => {
@@ -350,7 +525,7 @@ export default async function chatPage({ root, params, alive, back, go, rerender
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const text = input.value.trim();
-    const button = $('.btn', form);
+    const button = send;
     if (!text || button.disabled) return input.focus();
     button.disabled = true;
     try {

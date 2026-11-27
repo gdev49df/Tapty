@@ -241,12 +241,16 @@ export async function getListing(env, ctx, id, { owner, ip }) {
 }
 
 // Номер для звонка виден всем, а ссылки, чтобы написать, — только вошедшим.
-export async function getContact(env, id, { ip, user }) {
+export async function getContact(env, id, { ip, user, owner }) {
   // номера не должны собираться пачками
   await limit(env, `contact:${ip}`, 120, 3600);
   await limit(env, `contact-day:${ip}`, 400, DAY);
   const row = await findRow(env, id);
   if (publicStatus(row) !== 'active') fail(410, 'not_active');
+  // для статистики продавца: один человек за сутки считается один раз, сам продавец — не считается
+  if (row.owner !== owner && (await hit(env, `opened:${id}:${ip}`, 1, DAY))) {
+    await env.DB.prepare('UPDATE listings SET contacts = contacts + 1 WHERE id = ?').bind(id).run();
+  }
   return json({
     phone: row.phone,
     whatsapp: Boolean(user && row.whatsapp),
@@ -257,14 +261,16 @@ export async function getContact(env, id, { ip, user }) {
   });
 }
 
+// Свои объявления со статистикой: сколько человек добавили в избранное и открыли номер.
 export async function listMine(env, { owner }) {
   if (!owner) fail(401, 'no_key');
   const { results } = await env.DB.prepare(
-    'SELECT * FROM listings WHERE owner = ? ORDER BY created_at DESC LIMIT 100'
+    `SELECT l.*, (SELECT COUNT(*) FROM favorites f WHERE f.listing_id = l.id AND f.user_id != l.owner) AS favs
+     FROM listings l WHERE l.owner = ? ORDER BY l.created_at DESC LIMIT 100`
   )
     .bind(owner)
     .all();
-  return json({ items: results.map(own) });
+  return json({ items: results.map((r) => ({ ...own(r), favs: r.favs, contacts: r.contacts })) });
 }
 
 export async function getMine(env, id, { owner }) {

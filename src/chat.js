@@ -1,28 +1,40 @@
 // Переписка покупателя и продавца внутри сайта.
-import { CHAT_REASONS } from '../public/js/catalog.js';
+import { CHAT_REASONS, LEGAL_VERSION, LIMITS } from '../public/js/catalog.js';
 import { fail, json, limit, now, readJson } from './util.js';
 import { requireUser } from './auth.js';
 import { canReview } from './reviews.js';
-import { photoResponse, storePhoto } from './photos.js';
+import { photoResponse, storePhoto, storeVoice } from './photos.js';
 import { banSeller } from './listings.js';
 
 const MAX = 1000;
 
-async function readText(request) {
-  const text = String((await readJson(request)).text ?? '').replace(/\r/g, '').trim();
+function cleanText(value) {
+  const text = String(value ?? '').replace(/\r/g, '').trim();
   if (!text || text.length > MAX) fail(400, 'invalid', 'text');
   return text;
 }
 
-async function add(env, chat, me, text, photo = '') {
-  const t = now();
-  const { id } = await env.DB.prepare('INSERT INTO messages (chat_id, sender, text, created_at, photo) VALUES (?, ?, ?, ?, ?) RETURNING id')
-    .bind(chat.id, me, text, t, photo)
+// Текст для предложения цены и ответа на него нужен там, где сообщение показывают как есть
+// (модерация, старые копии сайта). Новые копии подписывают его сами, на языке читателя.
+const PRICE_WORDS = { offer: 'Предлагаю', accepted: 'Принимаю цену', declined: 'Не принимаю цену' };
+const priceMessage = (kind, amount) => ({ kind, amount, text: `${PRICE_WORDS[kind]} ${amount.toLocaleString('ru-RU')} ₸` });
+
+const view = (m, me) => ({
+  id: m.id, mine: m.sender === me, text: m.text, photo: m.photo, kind: m.kind, amount: m.amount, state: m.state,
+  voice: m.voice, seconds: m.seconds, at: m.created_at,
+});
+
+async function add(env, chat, me, { text = '', photo = '', kind = '', amount = 0, voice = '', seconds = 0 }) {
+  const row = await env.DB.prepare(
+    `INSERT INTO messages (chat_id, sender, text, created_at, photo, kind, amount, voice, seconds)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`
+  )
+    .bind(chat.id, me, text, now(), photo, kind, amount, voice, seconds)
     .first();
   // Своё сообщение, а значит и всё до него, уже прочитано.
   const column = chat.buyer === me ? 'buyer_read' : 'seller_read';
-  await env.DB.prepare(`UPDATE chats SET updated_at = ?, ${column} = ? WHERE id = ?`).bind(t, id, chat.id).run();
-  return { id, mine: true, text, photo, at: t };
+  await env.DB.prepare(`UPDATE chats SET updated_at = ?, ${column} = ? WHERE id = ?`).bind(row.created_at, row.id, chat.id).run();
+  return view(row, me);
 }
 
 const otherOf = (chat, me) => (chat.buyer === me ? chat.seller : chat.buyer);
@@ -49,18 +61,26 @@ async function findChat(env, id, me) {
   return chat;
 }
 
-// Первое сообщение по объявлению (или очередное, если диалог уже есть).
+// Первое сообщение по объявлению (или очередное, если диалог уже есть). Вместо текста можно предложить свою цену.
 export async function startChat(request, env, listingId, who) {
-  const text = await readText(request);
+  const body = await readJson(request);
+  const offering = body.offer !== undefined;
+  if (offering && !(Number.isSafeInteger(body.offer) && body.offer > 0 && body.offer <= LIMITS.priceMax)) fail(400, 'invalid', 'price');
+  const message = offering ? priceMessage('offer', body.offer) : { text: cleanText(body.text) };
   await requireUser(env, who);
-  const row = await env.DB.prepare('SELECT id, owner, title, status, expires_at FROM listings WHERE id = ?').bind(listingId).first();
+  const row = await env.DB.prepare('SELECT id, owner, title, status, expires_at, price_type FROM listings WHERE id = ?')
+    .bind(listingId)
+    .first();
   if (!row || row.status === 'hidden') fail(404, 'not_found');
   if (row.owner === who.owner) fail(400, 'own_listing');
   // Продавцу без аккаунта сообщения некуда доставить.
   if (!row.owner.startsWith('u:')) fail(409, 'no_chat');
   await assertOpen(env, who.owner, row.owner);
   let chat = await env.DB.prepare('SELECT * FROM chats WHERE listing_id = ? AND buyer = ?').bind(listingId, who.owner).first();
-  if (!chat && (row.status !== 'active' || row.expires_at <= now())) fail(410, 'not_active');
+  const live = row.status === 'active' && row.expires_at > now();
+  // торговаться можно только по действующему объявлению с торгом
+  if (!live && (offering || !chat)) fail(410, 'not_active');
+  if (offering && row.price_type !== 'bargain') fail(409, 'no_offer');
   await limit(env, `msg:${who.owner}`, 30, 60);
   if (!chat) {
     await limit(env, `chats:${who.owner}`, 30, 86400);
@@ -72,17 +92,43 @@ export async function startChat(request, env, listingId, who) {
       .run();
     chat = await env.DB.prepare('SELECT * FROM chats WHERE listing_id = ? AND buyer = ?').bind(listingId, who.owner).first();
   }
-  await add(env, chat, who.owner, text);
+  // ответить можно только на последнее предложение
+  if (offering) await env.DB.prepare("UPDATE messages SET state = 'replaced' WHERE chat_id = ? AND kind = 'offer' AND state = ''").bind(chat.id).run();
+  await add(env, chat, who.owner, message);
   return json({ chat: chat.id }, 201);
 }
 
+// Продавец принимает или отклоняет предложенную цену. Цена в объявлении при этом не меняется.
+export async function answerOffer(request, env, id, messageId, who) {
+  const { accept } = await readJson(request);
+  if (typeof accept !== 'boolean') fail(400, 'invalid', 'accept');
+  await requireUser(env, who);
+  const chat = await findChat(env, id, who.owner);
+  if (chat.seller !== who.owner) fail(403, 'forbidden');
+  await assertOpen(env, who.owner, chat.buyer);
+  const listing = await env.DB.prepare("SELECT 1 FROM listings WHERE id = ? AND status = 'active' AND expires_at > ?")
+    .bind(chat.listing_id, now())
+    .first();
+  if (!listing) fail(410, 'not_active');
+  await limit(env, `msg:${who.owner}`, 30, 60);
+  const state = accept ? 'accepted' : 'declined';
+  // одним запросом: из двух одновременных ответов пройдёт один
+  const offer = await env.DB.prepare(
+    "UPDATE messages SET state = ? WHERE id = ? AND chat_id = ? AND kind = 'offer' AND state = '' AND sender = ? RETURNING amount"
+  )
+    .bind(state, messageId, id, chat.buyer)
+    .first();
+  if (!offer) fail(409, 'offer_closed');
+  return json({ message: await add(env, chat, who.owner, priceMessage(state, offer.amount)) }, 201);
+}
+
 export async function sendMessage(request, env, id, who) {
-  const text = await readText(request);
+  const text = cleanText((await readJson(request)).text);
   await requireUser(env, who);
   const chat = await findChat(env, id, who.owner);
   await assertOpen(env, who.owner, otherOf(chat, who.owner));
   await limit(env, `msg:${who.owner}`, 30, 60);
-  return json({ message: await add(env, chat, who.owner, text) }, 201);
+  return json({ message: await add(env, chat, who.owner, { text }) }, 201);
 }
 
 export async function sendPhoto(request, env, id, who) {
@@ -93,7 +139,23 @@ export async function sendPhoto(request, env, id, who) {
   // снимки занимают место в базе, поэтому у них свой дневной предел
   await limit(env, `chatphoto:${who.owner}`, 40, 86400);
   const photo = await storePhoto(request, env, who.owner, id);
-  return json({ message: await add(env, chat, who.owner, '', photo) }, 201);
+  return json({ message: await add(env, chat, who.owner, { photo }) }, 201);
+}
+
+export async function sendVoice(request, env, id, who) {
+  const user = await requireUser(env, who);
+  // голос — новые сведения о человеке: сначала он должен принять действующую редакцию согласия
+  if (user.consent !== LEGAL_VERSION) fail(403, 'consent_needed');
+  const chat = await findChat(env, id, who.owner);
+  await assertOpen(env, who.owner, otherOf(chat, who.owner));
+  await limit(env, `msg:${who.owner}`, 30, 60);
+  await limit(env, `chatvoice:${who.owner}`, 40, 86400);
+  if (Number(request.headers.get('content-length') || 0) > LIMITS.voiceBytes + 10_000) fail(413, 'voice_too_large');
+  const form = await request.formData().catch(() => fail(400, 'bad_voice'));
+  const seconds = Number(form.get('seconds'));
+  if (!Number.isInteger(seconds) || seconds < 1 || seconds > LIMITS.voiceSeconds) fail(400, 'bad_voice');
+  const voice = await storeVoice(env, form.get('voice'), who.owner, id);
+  return json({ message: await add(env, chat, who.owner, { voice, seconds }) }, 201);
 }
 
 export async function chatPhoto(env, id, photo, variant, who) {
@@ -186,14 +248,14 @@ export async function listChats(env, who) {
   if (!who.user) fail(401, 'login_required');
   const { results } = await env.DB.prepare(
     `SELECT c.id, c.title AS saved_title, c.buyer, c.updated_at, u.name AS other, l.title, l.photos,
-       (SELECT text FROM messages WHERE chat_id = c.id ORDER BY id DESC LIMIT 1) AS last,
-       (SELECT sender FROM messages WHERE chat_id = c.id ORDER BY id DESC LIMIT 1) AS last_sender,
+       last.text AS last, last.sender AS last_sender, last.kind, last.amount, last.voice,
        EXISTS (SELECT 1 FROM blocks WHERE blocker = ?1 AND blocked = u.id) AS blocked,
        (SELECT COUNT(*) FROM messages m WHERE m.chat_id = c.id AND ${UNREAD}) AS unread,
        ${MINE('pinned')} AS pinned
      FROM chats c
      JOIN users u ON u.id = CASE WHEN c.buyer = ?1 THEN c.seller ELSE c.buyer END
      LEFT JOIN listings l ON l.id = c.listing_id
+     LEFT JOIN messages last ON last.id = (SELECT MAX(id) FROM messages WHERE chat_id = c.id)
      WHERE (c.buyer = ?1 OR c.seller = ?1)
        AND EXISTS (SELECT 1 FROM messages WHERE chat_id = c.id AND id > ${MINE('cleared')})
      ORDER BY pinned > 0 DESC, c.updated_at DESC, c.id DESC LIMIT 100`
@@ -207,6 +269,9 @@ export async function listChats(env, who) {
       title: r.title || r.saved_title,
       photo: r.photos ? firstPhoto(r.photos) : null,
       last: r.last,
+      lastKind: r.kind,
+      lastAmount: r.amount,
+      lastVoice: Boolean(r.voice),
       lastMine: r.last_sender === who.owner,
       unread: r.unread,
       blocked: Boolean(r.blocked),
@@ -222,12 +287,14 @@ export async function getChat(env, url, id, who) {
   const after = Math.max(parseInt(url.searchParams.get('after'), 10) || 0, 0);
   const buying = chat.buyer === who.owner;
   const mine = side(chat, who.owner);
-  const [{ results }, other, listing] = await Promise.all([
-    env.DB.prepare('SELECT id, sender, text, photo, created_at FROM messages WHERE chat_id = ? AND id > ? ORDER BY id DESC LIMIT 200')
+  const [{ results }, other, listing, offers] = await Promise.all([
+    env.DB.prepare('SELECT * FROM messages WHERE chat_id = ? AND id > ? ORDER BY id DESC LIMIT 200')
       .bind(id, Math.max(after, chat[`${mine}_cleared`]))
       .all(),
     env.DB.prepare('SELECT name FROM users WHERE id = ?').bind(buying ? chat.seller : chat.buyer).first(),
     env.DB.prepare('SELECT title, photos, price, price_type, status, expires_at FROM listings WHERE id = ?').bind(chat.listing_id).first(),
+    // состояние предложений меняется у уже полученных сообщений, поэтому приходит отдельно
+    env.DB.prepare("SELECT id, state FROM messages WHERE chat_id = ? AND kind = 'offer' ORDER BY id DESC LIMIT 50").bind(id).all(),
   ]);
   const newest = results[0]?.id || 0;
   if (newest > (buying ? chat.buyer_read : chat.seller_read)) {
@@ -257,10 +324,13 @@ export async function getChat(env, url, id, who) {
       blockedByMe: blocks.byMe,
       pinned: Boolean(chat[`${mine}_pinned`]),
       canWrite: !blocks.any,
+      // перед первым голосовым надо принять действующую редакцию согласия
+      needConsent: who.user.consent !== LEGAL_VERSION,
     },
+    offers: offers.results,
     // до какого сообщения дочитал собеседник
     read: buying ? chat.seller_read : chat.buyer_read,
-    messages: results.reverse().map((m) => ({ id: m.id, mine: m.sender === who.owner, text: m.text, photo: m.photo, at: m.created_at })),
+    messages: results.reverse().map((m) => view(m, who.owner)),
   });
 }
 
@@ -276,7 +346,7 @@ export async function adminComplaints(env) {
   const messages = ids.length
     ? (
         await env.DB.prepare(
-          `SELECT chat_id, sender, text, photo FROM (
+          `SELECT chat_id, sender, text, photo, voice, seconds FROM (
              SELECT *, ROW_NUMBER() OVER (PARTITION BY chat_id ORDER BY id DESC) AS n FROM messages
              WHERE chat_id IN (${ids.map(() => '?').join(',')})
            ) WHERE n <= 30 ORDER BY id`
@@ -296,12 +366,12 @@ export async function adminComplaints(env) {
       banned: Boolean(r.banned),
       messages: messages
         .filter((m) => m.chat_id === r.chat_id)
-        .map((m) => ({ accused: m.sender === r.target, text: m.text, photo: m.photo })),
+        .map((m) => ({ accused: m.sender === r.target, text: m.text, photo: m.photo, voice: m.voice, seconds: m.seconds })),
     })),
   });
 }
 
-// Модератору доступны снимки только из тех диалогов, на которые пожаловались.
+// Модератору доступны снимки и голосовые только из тех диалогов, на которые пожаловались.
 export async function adminChatPhoto(env, photo) {
   const row = await env.DB.prepare(
     'SELECT mime, full AS data FROM photos WHERE id = ? AND chat_id IN (SELECT chat_id FROM complaints)'

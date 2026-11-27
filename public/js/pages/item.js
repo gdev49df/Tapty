@@ -265,8 +265,8 @@ export default async function itemPage({ root, params, alive, back, go, rerender
   $('[data-contact]', root)?.addEventListener('click', openContact);
 
   // Сообщение уходит в чат на сайте, и открывается сама переписка.
-  const sendToChat = async (text) => {
-    const { chat } = await api(`/listings/${id}/chat`, { method: 'POST', body: { text } });
+  const sendToChat = async (body) => {
+    const { chat } = await api(`/listings/${id}/chat`, { method: 'POST', body });
     if (!alive()) return;
     toast(t('messageSent'));
     go(`/chat/${chat}`);
@@ -291,7 +291,7 @@ export default async function itemPage({ root, params, alive, back, go, rerender
       const button = $('button.btn', s.body);
       button.disabled = true;
       try {
-        await withAuth(t('authChat'), () => sendToChat(`${t('offerText')} ${money(sum)}`));
+        await withAuth(t('authChat'), () => sendToChat({ offer: sum }));
       } catch (err) {
         button.disabled = false;
         toast(errorText(err));
@@ -326,7 +326,7 @@ export default async function itemPage({ root, params, alive, back, go, rerender
       }
       send.disabled = true;
       try {
-        await withAuth(t('authChat'), () => sendToChat(text));
+        await withAuth(t('authChat'), () => sendToChat({ text }));
       } catch (e) {
         toast(errorText(e));
       }

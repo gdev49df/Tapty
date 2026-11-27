@@ -174,6 +174,15 @@ export async function deleteAccount(request, env, who) {
   return json({ ok: true });
 }
 
+// Согласие с действующей редакцией документов у аккаунта, созданного раньше неё.
+export async function acceptConsent(request, env, who) {
+  const { consent } = await readJson(request);
+  if (consent !== LEGAL_VERSION) fail(400, 'consent');
+  await requireUser(env, who);
+  await env.DB.prepare('UPDATE users SET consent_at = ?, consent_version = ? WHERE id = ?').bind(now(), LEGAL_VERSION, who.owner).run();
+  return json({ ok: true });
+}
+
 export async function signOut(env, who) {
   if (who.user) await env.DB.prepare('DELETE FROM sessions WHERE hash = ?').bind(who.hash).run();
   return json({ ok: true });

@@ -69,7 +69,7 @@ export const AREAS = {
 };
 
 // Редакция оферты, политики и согласия (public/js/pages/legal.js).
-export const LEGAL_VERSION = '2026-11-27';
+export const LEGAL_VERSION = '2026-11-28';
 export const PRICE_TYPES = ['fixed', 'bargain', 'exchange', 'free'];
 export const CONDITIONS = ['new', 'used'];
 export const REPORT_REASONS = ['fraud', 'banned', 'sold', 'wrong', 'other'];
@@ -86,6 +86,8 @@ export const LIMITS = {
   priceMax: 100_000_000_000,
   fullBytes: 900_000,
   thumbBytes: 150_000,
+  voiceSeconds: 60,
+  voiceBytes: 1_500_000,
   days: 30,
 };
 

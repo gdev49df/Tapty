@@ -4,7 +4,7 @@ import { authForm } from '../auth.js';
 import { icon } from '../icons.js';
 import { t } from '../i18n.js';
 import { askDeleteChat } from '../dialogs.js';
-import { $, dateText, emptyState, errorText, esc, timeText } from '../ui.js';
+import { $, dateText, emptyState, errorText, esc, lastText, timeText } from '../ui.js';
 
 export default async function chats({ root, alive, rerender, onLeave }) {
   root.innerHTML = `
@@ -43,7 +43,7 @@ export default async function chats({ root, alive, rerender, onLeave }) {
                     c.pinned ? `<span class="pinned" role="img" aria-label="${esc(t('pinnedTag'))}">${icon('pushpin')}</span>` : ''
                   }${esc(when(c.at))}</small></span>
                   <small>${c.blocked ? `${esc(t('blockedTag'))}. ` : ''}${esc(c.title)}</small>
-                  <span><span class="dialog-last">${c.lastMine ? `${esc(t('you'))}: ` : ''}${esc(c.last || t('photoMessage'))}</span>${
+                  <span><span class="dialog-last">${c.lastMine ? `${esc(t('you'))}: ` : ''}${esc(lastText(c))}</span>${
                     c.unread ? `<b>${c.unread}</b>` : ''
                   }</span>
                 </span></a>
