@@ -17,7 +17,8 @@ function search(model, prompt) {
   if (asked.includes('болтай')) return { response: 'Конечно, помогу!' };
   if (asked.includes('погода')) return answer({ words: [] });
   if (asked.includes('на чём ехать')) return answer({ words: ['самокат', 'велосипед'], cat: 'нет такой', city: 'astana', max: 1 });
-  if (asked.includes('подешевле')) return answer({ words: [], sort: 'cheap' });
+  if (asked.includes('подешевле')) return answer({ words: [], sort: 'cheap', new: false });
+  if (asked.includes('теперь шлем')) return answer({ words: ['шлем'], new: true });
   return { response: 'не JSON' };
 }
 

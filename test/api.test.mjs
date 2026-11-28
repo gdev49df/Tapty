@@ -429,6 +429,22 @@ try {
     const prices = refined.data.items.map((i) => i.price);
     assert.deepEqual(prices, [...prices].sort((a, b) => a - b));
 
+    // другая вещь — новый поиск: прежняя цена не тянется следом, город остаётся
+    const other = await ask({ text: 'а теперь шлем', filters: refined.data.filters });
+    assert.deepEqual(
+      [other.data.filters.words, other.data.filters.max, other.data.filters.sort, other.data.filters.city],
+      [['шлем'], null, '', 'astana']
+    );
+    assert.deepEqual(other.data.items.map((i) => i.id), [helmet]);
+    // без нейросети о другой вещи говорят новые слова, об уточнении — их отсутствие
+    const switched = await ask({ text: 'сломайся самокат', filters: other.data.filters });
+    assert.deepEqual([switched.data.filters.words, switched.data.filters.city], [['сломайся', 'самокат'], 'astana']);
+    const narrowed = await ask({ text: 'до 10 000', filters: other.data.filters });
+    assert.deepEqual([narrowed.data.filters.words, narrowed.data.filters.max], [['шлем'], 10000]);
+    // непонятое продолжение ничего не меняет
+    const lost = await ask({ text: 'какая сегодня погода', filters: other.data.filters });
+    assert.deepEqual([lost.data.unclear, lost.data.items, lost.data.filters.words], [true, [], ['шлем']]);
+
     // убранное условие ищется без нейросети
     const again = await ask({ filters: { ...bounded.data.filters, max: null } });
     assert.deepEqual([again.data.ai, again.data.filters.max], [null, null]);

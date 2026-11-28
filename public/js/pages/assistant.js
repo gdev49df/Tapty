@@ -1,144 +1,250 @@
-// Помощник поиска: просьба своими словами, понятые условия плашками и найденные объявления.
+// Помощник поиска в виде чата: человек пишет своими словами, в ответ приходят объявления.
+// Переписка живёт в памяти, пока открыт сайт; на сервере и в браузере она не сохраняется.
 import { api } from '../api.js';
 import { CATEGORIES } from '../catalog.js';
 import { icon } from '../icons.js';
 import { label, lang, t } from '../i18n.js';
 import { store } from '../store.js';
-import { $, cardHtml, cityName, emptyState, errorText, esc, money, skeleton, toast } from '../ui.js';
+import { $, $$, cardHtml, cityName, errorText, esc, money } from '../ui.js';
 
-let cache = null; // последний ответ для возврата «назад»
+const fill = (key, n) => t(key).replace('{n}', n);
+// Столько объявлений приходит самое большее.
+const MOST = 24;
+// Приветствие и благодарность не требуют ни поиска, ни нейросети.
+const SMALL_TALK = [
+  ['aiHi', /^(?:привет(?:ик)?|здравствуй(?:те)?|добрый (?:день|вечер)|доброе утро|салам|салем|сәлем(?:етсіз бе)?|hi|hello)[\s!.,)]*$/i],
+  ['aiThanks', /^(?:спасибо|спс|благодарю|рахмет|thanks)(?:\s+(?:большое|вам|тебе))?[\s!.,)]*$/i],
+];
 
-const fill = (key, n) => t(key).replace('{n}', money(n));
+let talk = []; // сообщения по порядку
+let filters = null; // условия последнего удачного поиска
+let waiting = false;
+let turn = 0; // новый поиск отменяет ответ на прежний
+let owner = '';
+let page = null; // открытая сейчас страница чата
+
+function reset() {
+  talk = [];
+  filters = null;
+  waiting = false;
+  turn += 1;
+}
 
 // Условия, которые понял помощник: каждое можно убрать.
-const chips = (f) =>
+const conditions = (f) =>
   [
     f.words.length && ['words', f.words.slice(0, 3).join(', ')],
     f.cat && ['cat', label(CATEGORIES.find((c) => c.id === f.cat))],
     f.city && ['city', cityName(f.city)],
-    f.min && ['min', fill('aiMin', f.min)],
-    f.max && ['max', fill('aiMax', f.max)],
+    f.min && ['min', fill('aiMin', money(f.min))],
+    f.max && ['max', fill('aiMax', money(f.max))],
     f.cond && ['cond', t(f.cond)],
     f.type && ['type', t(f.type)],
     f.sort && ['sort', t(f.sort === 'cheap' ? 'sortCheap' : 'sortExpensive')],
   ].filter(Boolean);
 
-export default function assistant({ root, query, alive, back, restored }) {
-  const asked = (query.get('q') || '').slice(0, 200);
-  if (!restored) cache = null;
+// Тексты собираются при показе, чтобы смена языка действовала и на прежние ответы.
+function words(m) {
+  if (m.kind === 'fail') return `${t('aiFail')} ${errorText(m.error)}`;
+  if (m.kind !== 'result') return t(m.kind);
+  const { items, relaxed, ai } = m;
+  const lines = [];
+  if (relaxed.length) lines.push(`${t('aiNoExact')} ${relaxed.map((r) => t(`ai_${r}`)).join(', ')}.`);
+  lines.push(items.length ? fill(items.length < MOST ? 'aiCount' : 'aiTop', items.length) : t('aiNothing'));
+  if (ai === false) lines.push(t('aiBasic'));
+  return lines.join('\n');
+}
+
+const bubble = (text, mine) => `<div class="msg${mine ? ' mine' : ''}"><p>${esc(text)}</p></div>`;
+
+// Сначала немного объявлений, чтобы ответ помещался на экране.
+const firstShown = () => (matchMedia('(min-width: 640px)').matches ? 6 : 4);
+
+function messageHtml(m, i) {
+  if (m.mine) return bubble(m.drop ? fill('aiDropped', m.drop) : m.text, true);
+  const items = m.items || [];
+  const rest = items.length - m.shown;
+  return `<div class="ai-reply" data-at="${i}">
+    ${bubble(words(m))}
+    <div class="ai-chips"></div>
+    ${items.length ? `<div class="grid">${items.slice(0, m.shown).map(cardHtml).join('')}</div>` : ''}
+    ${rest > 0 ? `<button type="button" class="btn ghost small" data-show>${esc(fill('aiShowMore', rest))}</button>` : ''}
+  </div>`;
+}
+
+export default function assistant({ root, query, alive, back, restored, onLeave }) {
+  // после выхода из аккаунта чужая переписка на экране не остаётся
+  const session = store.get('session', '');
+  if (owner && owner !== session) reset();
+  owner = session;
 
   root.innerHTML = `
-    <div class="page-head"><button class="icon-btn" data-back aria-label="${esc(t('back'))}">${icon('back')}</button><h1>${esc(t('aiTitle'))}</h1></div>
-    <form class="form ai-form">
-      <label class="field"><span></span><textarea class="input" name="text" rows="2" maxlength="200" enterkeyhint="search"></textarea></label>
-      <button class="btn wide">${icon('search')}<span></span></button>
-      <div class="quick ai-tries">${['aiTry1', 'aiTry2', 'aiTry3'].map((k) => `<button type="button" data-try>${esc(t(k))}</button>`).join('')}</div>
-      <p class="muted small">${esc(t('aiNote'))}</p>
-    </form>
-    <div class="ai-result" aria-live="polite"></div>`;
+    <div class="chat ai-chat">
+      <div class="chat-top">
+        <div class="chat-head">
+          <div class="page-head"><button class="icon-btn" data-back aria-label="${esc(t('back'))}">${icon('back')}</button><h1>${esc(t('aiTitle'))}</h1></div>
+          <button class="icon-btn" data-again aria-label="${esc(t('aiAgain'))}" title="${esc(t('aiAgain'))}">${icon('refresh')}</button>
+        </div>
+      </div>
+      <div class="messages" role="log" aria-live="polite">
+        ${bubble(t('aiHello'))}
+        <p class="ai-note">${esc(t('aiNote'))}</p>
+        <div class="quick ai-tries">${['aiTry1', 'aiTry2', 'aiTry3'].map((k) => `<button type="button" data-try>${esc(t(k))}</button>`).join('')}</div>
+        <div class="ai-talk"></div>
+      </div>
+      <form class="composer">
+        <textarea class="input" rows="1" maxlength="200" enterkeyhint="send" aria-label="${esc(t('aiInput'))}"></textarea>
+        <button class="btn" aria-label="${esc(t('sendMessage'))}">${icon('send')}</button>
+      </form>
+    </div>`;
   $('[data-back]', root).onclick = back;
-  const form = $('.ai-form', root);
-  const field = form.elements.text;
-  const button = $('.btn', form);
-  const out = $('.ai-result', root);
+  const list = $('.ai-talk', root);
+  const form = $('.composer', root);
+  const input = $('textarea', form);
+  const send = $('.btn', form);
 
-  // До первого ответа форма спрашивает, что искать, после него — что поменять.
-  const paintForm = () => {
-    const refining = Boolean(cache);
-    $('.field > span', form).textContent = t(refining ? 'aiRefineAsk' : 'aiAsk');
-    field.placeholder = t(refining ? 'aiRefineExample' : 'aiExample');
-    $('span', button).textContent = t(refining ? 'aiRefine' : 'aiFind');
-    $('.ai-tries', form).hidden = refining;
-  };
+  const toEnd = () => scrollTo(0, document.documentElement.scrollHeight);
+
+  // Меняется от сообщения к сообщению: условия под последним ответом, состояние поля, «печатает».
+  function paintState() {
+    $$('.ai-chips', list).forEach((box) => (box.innerHTML = ''));
+    const last = talk.findLastIndex((m) => m.kind === 'result');
+    const box = $(`[data-at="${last}"] .ai-chips`, list);
+    if (box && filters) {
+      box.innerHTML = conditions(filters)
+        .map(([key, text]) => `<button type="button" class="chip" data-drop="${key}" aria-label="${esc(`${t('aiDrop')}: ${text}`)}">${esc(text)}${icon('close')}</button>`)
+        .join('');
+    }
+    $$('[data-retry]', list).forEach((b) => b.remove());
+    const failed = talk.at(-1);
+    if (failed?.kind === 'fail' && !waiting) {
+      list.lastElementChild.insertAdjacentHTML('beforeend', `<button type="button" class="btn ghost small" data-retry>${esc(t('retry'))}</button>`);
+    }
+    $('.ai-typing', list)?.remove();
+    if (waiting) {
+      list.insertAdjacentHTML('beforeend', `<div class="msg ai-typing"><p><i></i><i></i><i></i><span class="sr-only">${esc(t('aiTyping'))}</span></p></div>`);
+    }
+    $('.ai-tries', root).hidden = talk.length > 0;
+    $('[data-again]', root).hidden = !talk.length;
+    input.placeholder = t(filters ? 'aiInputMore' : 'aiInput');
+    send.disabled = waiting;
+  }
 
   function draw() {
-    paintForm();
-    if (!cache) {
-      out.innerHTML = '';
-      return;
-    }
-    const { filters, items, relaxed, ai } = cache;
-    out.innerHTML = `
-      <div class="ai-seek"><h2>${esc(t('aiSeek'))}</h2><div class="ai-chips">${chips(filters)
-        .map(([key, text]) => `<button type="button" class="chip" data-drop="${key}" aria-label="${esc(`${t('aiDrop')}: ${text}`)}">${esc(text)}${icon('close')}</button>`)
-        .join('')}</div></div>
-      ${ai === false ? `<p class="why">${esc(t('aiBasic'))}</p>` : ''}
-      ${relaxed.length ? `<p class="why">${esc(`${t('aiNoExact')} ${relaxed.map((r) => t(`ai_${r}`)).join(', ')}.`)}</p>` : ''}
-      ${
-        items.length
-          ? `<h2>${esc(t('aiFound'))}</h2><div class="grid">${items.map(cardHtml).join('')}</div>`
-          : emptyState(t('aiNothing'), t('aiNothingHint'))
-      }
-      <button type="button" class="btn ghost wide ai-again" data-again>${esc(t('aiAgain'))}</button>`;
+    list.innerHTML = talk.map(messageHtml).join('');
+    paintState();
   }
 
-  let run = 0;
+  // Новое сообщение дописывается в конец, прежние карточки не перерисовываются.
+  function show(m) {
+    if (!alive()) return;
+    $('.ai-typing', list)?.remove();
+    list.insertAdjacentHTML('beforeend', messageHtml(m, talk.length - 1));
+    const added = list.lastElementChild;
+    added.classList.add('new');
+    paintState();
+    // длинный ответ читают с начала, короткое сообщение — это конец переписки
+    if (m.items?.length) added.scrollIntoView({ block: 'start' });
+    else toEnd();
+  }
+
+  const add = (m) => {
+    talk.push(m);
+    page?.show(m);
+  };
+  const reply = (kind, more = {}) => add({ kind, shown: firstShown(), ...more });
+
   async function ask(body) {
-    const mine = ++run;
-    button.disabled = true;
-    const before = out.innerHTML;
-    out.innerHTML = `<div class="grid">${skeleton(4)}</div>`;
+    const mine = ++turn;
+    waiting = true;
+    page.paintState();
+    page.toEnd();
     try {
       const data = await api('/ai/search', { method: 'POST', body: { lang: lang(), ...body } });
-      if (!alive() || mine !== run) return;
-      // непонятую первую просьбу не за что уточнять; когда просто убрали условие,
-      // про нейросеть остаётся известное из прошлого ответа
-      cache = data.unclear ? null : { ...data, ai: data.ai ?? cache?.ai };
-      field.value = data.unclear ? field.value : '';
-      draw();
-      if (data.unclear) out.innerHTML = emptyState(t('aiUnclear'), t('aiUnclearHint'));
-      else out.scrollIntoView({ block: 'start', behavior: 'auto' });
-    } catch (e) {
-      if (!alive() || mine !== run) return;
-      out.innerHTML = before;
-      toast(errorText(e));
-    } finally {
-      if (mine === run) button.disabled = false;
+      if (mine !== turn) return;
+      waiting = false;
+      if (data.unclear) return reply(filters ? 'aiUnclearMore' : 'aiUnclear');
+      filters = data.filters;
+      reply('result', { items: data.items, relaxed: data.relaxed, ai: data.ai });
+    } catch (error) {
+      if (mine !== turn) return;
+      waiting = false;
+      reply('fail', { error, body });
     }
   }
 
-  form.onsubmit = (e) => {
-    e.preventDefault();
-    const text = field.value.trim();
-    if (text.length < 2 || button.disabled) return field.focus();
-    field.blur();
-    ask(cache ? { text, filters: cache.filters } : { text, city: store.get('city', '') });
+  function say(text) {
+    if (waiting) return false;
+    add({ mine: true, text });
+    const small = SMALL_TALK.find(([, re]) => re.test(text));
+    if (small) reply(small[0]);
+    else ask(filters ? { text, filters } : { text, city: store.get('city', '') });
+    return true;
+  }
+
+  // Поле растёт вместе с текстом.
+  const resize = () => {
+    input.style.height = 'auto';
+    input.style.height = `${Math.min(input.scrollHeight + 2, 120)}px`;
   };
-  field.addEventListener('keydown', (e) => {
+  input.addEventListener('input', resize);
+  input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       form.requestSubmit();
     }
   });
-  form.addEventListener('click', (e) => {
+  // кнопка отправки не должна прятать клавиатуру
+  send.addEventListener('pointerdown', (e) => e.preventDefault());
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    const text = input.value.replace(/\s+/g, ' ').trim();
+    if (!text || !say(text)) return;
+    input.value = '';
+    resize();
+  };
+
+  $('[data-again]', root).onclick = () => {
+    reset();
+    draw();
+    scrollTo(0, 0);
+    input.focus();
+  };
+
+  $('.messages', root).addEventListener('click', (e) => {
     const example = e.target.closest('[data-try]');
-    if (!example) return;
-    field.value = example.textContent;
-    form.requestSubmit();
-  });
-  out.addEventListener('click', (e) => {
-    if (e.target.closest('[data-again]')) {
-      cache = null;
-      field.value = '';
-      draw();
-      scrollTo(0, 0);
-      return field.focus();
+    if (example) return say(example.textContent);
+    const more = e.target.closest('[data-show]');
+    if (more) {
+      const box = more.closest('[data-at]');
+      const m = talk[Number(box.dataset.at)];
+      $('.grid', box).insertAdjacentHTML('beforeend', m.items.slice(m.shown).map(cardHtml).join(''));
+      m.shown = m.items.length;
+      return more.remove();
     }
+    if (waiting) return;
+    if (e.target.closest('[data-retry]')) return ask(talk.at(-1).body);
     const drop = e.target.closest('[data-drop]');
-    if (!drop || button.disabled) return;
+    if (!drop) return;
     const key = drop.dataset.drop;
-    const filters = { ...cache.filters, [key]: key === 'words' ? [] : null };
+    const next = { ...filters, [key]: key === 'words' ? [] : null };
+    add({ mine: true, drop: drop.textContent.trim() });
     // убрали всё — начинаем сначала
-    if (!chips({ ...filters, sort: '' }).length) {
-      cache = null;
-      return draw();
+    if (!conditions({ ...next, sort: '' }).length) {
+      filters = null;
+      return reply('aiReset');
     }
-    ask({ filters });
+    ask({ filters: next });
   });
 
+  page = { show, paintState, toEnd: () => alive() && toEnd() };
+  onLeave(() => (page = null));
   draw();
-  if (!cache && asked) {
-    field.value = asked;
-    form.requestSubmit();
-  } else if (!cache) field.focus();
+
+  const asked = (query.get('q') || '').slice(0, 200).trim();
+  // из поиска приходят с готовой просьбой; адрес очищается, чтобы она не отправилась второй раз
+  if (asked) history.replaceState(history.state, '', '/assistant');
+  if (asked && !restored) say(asked);
+  // Роутер после отрисовки прокручивает наверх, поэтому к последнему сообщению переходим кадром позже.
+  if (!restored && talk.length) requestAnimationFrame(() => alive() && toEnd());
 }

@@ -105,12 +105,12 @@ async function render({ restored = false } = {}) {
 
   document.documentElement.lang = lang();
   document.title = 'Tapty';
-  document.body.dataset.page = isItem ? 'item' : page === chatPage ? 'chat' : page === admin ? 'admin' : path === '/' ? 'home' : path === '/search' ? 'search' : '';
+  document.body.dataset.page = isItem ? 'item' : page === chatPage || page === assistant ? 'chat' : page === admin ? 'admin' : path === '/' ? 'home' : path === '/search' ? 'search' : '';
   chrome(tab);
   // В переписке полоса выдавила бы поле ввода за экран.
-  promo.update(page !== chatPage && page !== admin);
+  promo.update(page !== chatPage && page !== assistant && page !== admin);
   // В форме, профиле и модерации подвал только мешает.
-  footer.update(![post, me, myShop, chats, chatPage, admin].includes(page));
+  footer.update(![post, me, myShop, chats, chatPage, assistant, admin].includes(page));
   maintenance.update(page !== admin);
 
   view.innerHTML = '';
