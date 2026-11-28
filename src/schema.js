@@ -40,7 +40,8 @@ const STATEMENTS = [
     full BLOB,
     thumb BLOB,
     created_at INTEGER NOT NULL,
-    chat_id INTEGER
+    chat_id INTEGER,
+    shop_id INTEGER
   )`,
   `CREATE INDEX IF NOT EXISTS photos_listing ON photos (listing_id, created_at)`,
   `CREATE TABLE IF NOT EXISTS reports (
@@ -103,6 +104,29 @@ const STATEMENTS = [
     created_at INTEGER NOT NULL,
     UNIQUE (chat_id, reporter)
   )`,
+  // Магазин: один на аккаунт. rev растёт при каждом изменении, чтобы модератор не открыл то, чего не видел.
+  `CREATE TABLE IF NOT EXISTS shops (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    name_key TEXT NOT NULL,
+    about TEXT NOT NULL,
+    city TEXT NOT NULL,
+    address TEXT NOT NULL DEFAULT '',
+    hours TEXT NOT NULL DEFAULT '',
+    phone TEXT NOT NULL,
+    logo TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    note TEXT NOT NULL DEFAULT '',
+    rev INTEGER NOT NULL DEFAULT 1,
+    consent_at INTEGER,
+    consent_version TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`,
+  // отклонённая заявка название не занимает
+  `CREATE UNIQUE INDEX IF NOT EXISTS shops_name ON shops (name_key) WHERE status != 'rejected'`,
+  `CREATE INDEX IF NOT EXISTS shops_status ON shops (status, updated_at)`,
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
 ];
 
@@ -114,7 +138,8 @@ const COLUMNS = {
     // когда и какую редакцию оферты и согласия человек принял; у старых аккаунтов пусто
     consent_at: 'INTEGER', consent_version: 'TEXT',
   },
-  photos: { chat_id: 'INTEGER' },
+  // chat_id — снимок из переписки, shop_id — логотип магазина
+  photos: { chat_id: 'INTEGER', shop_id: 'INTEGER' },
   // у каждого участника свои «закрепить» и «удалить»: *_cleared — номер последнего удалённого у него сообщения
   chats: {
     buyer_pinned: 'INTEGER NOT NULL DEFAULT 0',

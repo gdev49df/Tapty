@@ -147,6 +147,7 @@ const ERASE = [
   `DELETE FROM reports WHERE listing_id IN (${MY_ADS})`,
   `DELETE FROM favorites WHERE user_id = ?1 OR listing_id IN (${MY_ADS})`,
   'DELETE FROM listings WHERE owner = ?1',
+  'DELETE FROM shops WHERE owner = ?1',
   'DELETE FROM reviews WHERE author = ?1 OR seller = ?1',
   'DELETE FROM blocks WHERE blocker = ?1 OR blocked = ?1',
   'DELETE FROM sessions WHERE user_id = ?1',

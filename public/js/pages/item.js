@@ -5,7 +5,7 @@ import { icon } from '../icons.js';
 import { adsCount, label, reviewsCount, t, viewsCount } from '../i18n.js';
 import { favorites } from '../favorites.js';
 import { openViewer } from '../viewer.js';
-import { $, $$, areaName, cardHtml, cityName, copyText, dateText, emptyState, errorText, esc, initial, money, phoneText, placeText, priceText, ratingText, sheet, sinceText, stars, toast, verifiedBadge, wasCheaper } from '../ui.js';
+import { $, $$, areaName, cardHtml, cityName, copyText, dateText, emptyState, errorText, esc, initial, money, phoneText, placeText, priceText, ratingText, sheet, shopBadge, shopLogo, sinceText, stars, toast, verifiedBadge, wasCheaper } from '../ui.js';
 
 export default async function itemPage({ root, params, alive, back, go, rerender }) {
   const id = Number(params[0]);
@@ -148,16 +148,16 @@ export default async function itemPage({ root, params, alive, back, go, rerender
         </div>
         <div class="item-seller">
           <section class="seller-card">
-            <span class="avatar" aria-hidden="true">${initial(item.name)}</span>
-            <div><h2>${esc(item.name)}</h2>
+            ${seller.shop ? shopLogo(seller.shop) : `<span class="avatar" aria-hidden="true">${initial(item.name)}</span>`}
+            <div><h2>${esc(seller.shop?.name ?? item.name)}</h2>
               <p>${esc(sinceText(seller.since))}</p><p>${esc(adsCount(seller.count))}</p></div>
-            ${seller.verified ? verifiedBadge() : ''}
+            ${seller.shop || seller.verified ? `<div class="badges">${seller.shop ? shopBadge() : ''}${seller.verified ? verifiedBadge() : ''}</div>` : ''}
             <a class="rating" href="/seller/${id}">${
               seller.reviews
                 ? `${stars(seller.rating)}<b>${esc(ratingText(seller.rating))}</b><span>${esc(reviewsCount(seller.reviews))}</span>`
                 : `<span>${esc(t('noReviews'))}</span>`
             }</a>
-            <a class="btn ghost wide" href="/seller/${id}">${esc(t('allSellerAds'))}</a>
+            <a class="btn ghost wide" href="${seller.shop ? `/shop/${seller.shop.id}` : `/seller/${id}`}">${esc(t(seller.shop ? 'shopGo' : 'allSellerAds'))}</a>
           </section>
           ${item.mine ? '' : `<p class="safety">${icon('shield')}<span>${esc(t('safety'))}</span></p>`}
           ${item.mine ? '' : `<button class="link-btn" data-report>${icon('flag')}${esc(t('report'))}</button>`}

@@ -18,6 +18,8 @@ import chatPage from './pages/chat.js';
 import { closeViewer } from './viewer.js';
 import { paintUnread, refreshUnread } from './unread.js';
 import seller from './pages/seller.js';
+import shop from './pages/shop.js';
+import myShop from './pages/myshop.js';
 import { footer } from './footer.js';
 import { promo } from './promo.js';
 import admin from './pages/admin.js';
@@ -34,6 +36,8 @@ const ROUTES = [
   [/^\/edit\/(\d+)$/, post, 'me'],
   [/^\/item\/(\d+)$/, item, ''],
   [/^\/seller\/(\d+)$/, seller, ''],
+  [/^\/shop$/, myShop, 'me'],
+  [/^\/shop\/(\d+)$/, shop, ''],
   [/^\/fav$/, fav, 'fav'],
   [/^\/chats$/, chats, 'chats'],
   [/^\/chat\/(\d+)$/, chatPage, 'chats'],
@@ -103,7 +107,7 @@ async function render({ restored = false } = {}) {
   // В переписке полоса выдавила бы поле ввода за экран.
   promo.update(page !== chatPage && page !== admin);
   // В форме, профиле и модерации подвал только мешает.
-  footer.update(![post, me, chats, chatPage, admin].includes(page));
+  footer.update(![post, me, myShop, chats, chatPage, admin].includes(page));
 
   view.innerHTML = '';
   const restore = scroll.get(key) ?? 0;

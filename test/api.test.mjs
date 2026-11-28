@@ -999,6 +999,115 @@ try {
     assert.ok(!('contacts' in open_) && !('favs' in open_));
   });
 
+  await test('магазин: заявка, проверка модератором и страница', async () => {
+    const ip = '203.0.113.80';
+    const req = as(ip);
+    const secret = key();
+    const owner = await signUp('Лавочник', { ip, secret });
+    const rival = await signUp('Сосед', { ip });
+    const goods = await create(owner, { title: 'Чайник заварочный', phone: '77080000001' });
+    const form = (over = {}) => ({
+      name: 'Уютный дом', about: 'Посуда и всё для кухни', city: 'astana', address: 'Кабанбай батыра, 1', hours: 'с 10 до 20',
+      phone: '8 708 000 00 02', logo: '', consent: LEGAL_VERSION, ...over,
+    });
+    const save = (token, over) => req('/api/shop', token, form(over), 'PUT');
+    const mine = async (token) => (await req('/api/shop', token)).data.shop;
+    const list = async () => (await admin('shops')).data.items;
+    const decide = async (id, action, note = '', rev) =>
+      admin(`shops/${id}`, { action, note, rev: rev ?? (await list()).find((s) => s.id === id).rev });
+
+    assert.equal((await save(key())).data.error, 'login_required');
+    assert.equal((await req('/api/shop', key())).data.error, 'login_required');
+    for (const [over, field] of [
+      [{ name: 'Я' }, 'shopName'], [{ name: '. . .' }, 'shopName'], [{ about: 'мало' }, 'about'], [{ city: 'moon' }, 'city'],
+      [{ phone: '123' }, 'phone'], [{ address: 'а'.repeat(101) }, 'address'], [{ logo: 'не фото' }, 'logo'],
+    ]) {
+      const r = await save(owner, over);
+      assert.deepEqual([r.status, r.data.field], [400, field], JSON.stringify(over).slice(0, 80));
+    }
+    for (const consent of [undefined, true, '2000-01-01']) assert.equal((await save(owner, { consent })).data.error, 'consent');
+    assert.equal(await mine(owner), null);
+
+    // чужое фото и фото из объявления логотипом не станут
+    const foreign = (await upload(rival)).data.id;
+    assert.equal((await save(owner, { logo: foreign })).data.error, 'photos_lost');
+    const logo = (await upload(owner)).data.id;
+    const made = await save(owner, { logo });
+    assert.equal(made.status, 201, JSON.stringify(made.data));
+    const { id } = made.data.shop;
+    assert.deepEqual([made.data.shop.status, made.data.shop.phone, made.data.shop.logo], ['pending', '77080000002', logo]);
+    // логотип нельзя прицепить к объявлению: вместе с объявлением он бы удалился
+    const stolen = await req('/api/listings', owner, listing({ phone: '77080000001', photos: [logo] }));
+    assert.equal(stolen.data.error, 'photos_lost');
+    // до одобрения магазина никто не видит
+    assert.equal((await req(`/api/shops/${id}`, rival)).status, 404);
+    assert.equal((await req(`/api/shops/${id}/contact`, rival, {})).status, 404);
+    assert.equal((await req(`/api/listings/${goods}`, rival)).data.seller.shop, null);
+    // то же название с другими пробелами и регистром занято
+    const taken = await save(rival, { name: 'уютный-дом.' });
+    assert.deepEqual([taken.status, taken.data.error, taken.data.field], [409, 'shop_name_taken', 'shopName']);
+
+    assert.equal((await call('/api/admin/shops', { headers: { 'x-admin-key': 'nope' } })).status, 403);
+    assert.equal((await req(`/api/admin/shops/${id}`, owner, { action: 'approve', rev: 1 })).status, 403);
+    const [waiting] = await list();
+    assert.deepEqual([waiting.id, waiting.status, waiting.ads], [id, 'pending', 1]);
+    // заявку поправили после того, как модератор её открыл: вслепую она не одобряется
+    assert.equal((await save(owner, { logo, about: 'Посуда, кухня и немного другого', consent: undefined })).status, 200);
+    assert.equal((await decide(id, 'approve', '', waiting.rev)).data.error, 'shop_changed');
+    assert.equal((await decide(id, 'reject')).data.field, 'note');
+    assert.equal((await decide(id, 'close', 'рано')).data.error, 'shop_changed');
+    assert.equal((await decide(id, 'reject', 'Напишите подробнее')).status, 200);
+    assert.deepEqual([(await mine(owner)).status, (await mine(owner)).note], ['rejected', 'Напишите подробнее']);
+    // отклонённая заявка снова уходит на проверку
+    const again = await save(owner, { logo });
+    assert.deepEqual([again.data.shop.status, again.data.shop.note], ['pending', '']);
+    assert.equal((await decide(id, 'approve')).status, 200);
+
+    const page = (await req(`/api/shops/${id}`, rival)).data;
+    assert.deepEqual([page.shop.name, page.shop.mine, page.items.map((i) => i.id)], ['Уютный дом', false, [goods]]);
+    assert.ok(!('phone' in page.shop) && !('status' in page.shop) && !('owner' in page.shop));
+    assert.equal((await req(`/api/shops/${id}/contact`, rival, {})).data.phone, '77080000002');
+    assert.deepEqual((await req(`/api/listings/${goods}`, rival)).data.seller.shop, { id, name: 'Уютный дом', logo });
+    assert.equal((await req(`/api/listings/${goods}/seller`, rival)).data.seller.shop.id, id);
+
+    // у открытого магазина название не меняется, остальное правится сразу
+    assert.equal((await save(owner, { name: 'Другое имя', logo })).data.error, 'shop_name_locked');
+    const newLogo = (await upload(owner)).data.id;
+    const edited = await save(owner, { logo: newLogo, hours: 'круглосуточно', consent: undefined });
+    assert.deepEqual([edited.data.shop.status, edited.data.shop.hours], ['approved', 'круглосуточно']);
+    assert.equal((await fetch(`${BASE}/p/${logo}/t`)).status, 404);
+
+    // закрытый модератором: не виден, не правится и не удаляется владельцем
+    assert.equal((await decide(id, 'close', 'Жалобы покупателей')).status, 200);
+    assert.equal((await req(`/api/shops/${id}`, rival)).status, 404);
+    assert.equal((await save(owner, { logo: newLogo })).data.error, 'shop_closed');
+    assert.equal((await req('/api/shop', owner, undefined, 'DELETE')).data.error, 'shop_closed');
+    assert.equal((await decide(id, 'reopen')).status, 200);
+    assert.equal((await req(`/api/shops/${id}`, rival)).status, 200);
+
+    // владелец удаляет магазин: логотип стирается, объявления остаются, название свободно
+    assert.equal((await req('/api/shop', owner, undefined, 'DELETE')).status, 200);
+    assert.equal(await mine(owner), null);
+    assert.equal((await fetch(`${BASE}/p/${newLogo}/t`)).status, 404);
+    assert.equal((await req(`/api/listings/${goods}`, rival)).data.seller.shop, null);
+    const second = (await save(rival)).data.shop.id;
+    await decide(second, 'approve');
+
+    // блокировка продавца закрывает и магазин
+    const hisGoods = await create(rival, { title: 'Сковорода', phone: '77080000003' });
+    await admin(`${hisGoods}`, { action: 'ban' });
+    assert.equal((await req(`/api/shops/${second}`, owner)).status, 404);
+    assert.equal((await mine(rival)).status, 'closed');
+    assert.equal((await save(rival)).data.error, 'banned');
+
+    // удаление аккаунта стирает и магазин с логотипом
+    const lastLogo = (await upload(owner)).data.id;
+    const third = (await save(owner, { name: 'Третий', logo: lastLogo })).data.shop.id;
+    assert.equal((await req('/api/auth/delete', owner, { key: secret })).status, 200);
+    assert.ok(!(await list()).some((s) => s.id === third));
+    assert.equal((await fetch(`${BASE}/p/${lastLogo}/t`)).status, 404);
+  });
+
   await test('изменения с чужих сайтов не принимаются', async () => {
     const send = (origin) =>
       call('/api/auth/logout', { token: key(), method: 'POST', headers: { 'cf-connecting-ip': '192.0.2.30', ...(origin && { origin }) } });

@@ -31,6 +31,9 @@ export default async function me({ root, alive, rerender }) {
           <button class="icon-btn" data-logout aria-label="${esc(t('logout'))}">${icon('logout')}</button>
         </div>
         <ul class="menu">
+          <li><a href="/shop" data-shop>${icon('store')}<span>${esc(t('shopOpen'))}</span><small></small>${icon('next')}</a></li>
+        </ul>
+        <ul class="menu">
           <li><button data-security="password">${icon('lock')}<span>${esc(t('changePassword'))}</span><small></small>${icon('next')}</button></li>
           <li><button data-security="code">${icon('key')}<span>${esc(t('codeTitle'))}</span><small${user.recovery ? '' : ' class="todo"'}>${esc(t(user.recovery ? 'codeExists' : 'codeMissing'))}</small>${icon('next')}</button></li>
           <li><button class="danger" data-security="delete">${icon('trash')}<span>${esc(t('deleteAccount'))}</span><small></small>${icon('next')}</button></li>
@@ -43,6 +46,17 @@ export default async function me({ root, alive, rerender }) {
         await signOut();
         rerender();
       };
+      // состояние магазина подгружается следом и не задерживает список объявлений
+      api('/shop')
+        .then(({ shop }) => {
+          if (!alive() || !shop) return;
+          const row = $('[data-shop]', account);
+          $('span', row).textContent = t('shopMine');
+          const state = $('small', row);
+          state.textContent = t(`shopSt_${shop.status}`);
+          if (shop.status === 'rejected') state.className = 'todo';
+        })
+        .catch(() => {});
     } else {
       authForm(account, { note: t('authWhy'), onDone: rerender });
     }

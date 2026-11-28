@@ -1,7 +1,7 @@
 // Модерация: открывается по адресу /admin и ключу из секрета ADMIN_KEY. Если задан секрет
 // ADMIN_TOTP, дополнительно нужен код из приложения-аутентификатора.
 import { api, apiBlob } from '../api.js';
-import { $, errorText, esc, phoneText, priceText, toast } from '../ui.js';
+import { cityName, $, errorText, esc, phoneText, priceText, shopLogo, toast } from '../ui.js';
 
 let adminKey = '';
 // пропуск после кода из приложения, живёт 12 часов и только в этой вкладке
@@ -26,9 +26,10 @@ export default function admin({ root, alive }) {
       <form class="form">
         <label class="field"><span>Ключ администратора</span><input class="input" name="key" type="password" autocomplete="off"></label>
         <label class="field" data-code hidden><span>Код из приложения</span><input class="input" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7"></label>
-        <button class="btn wide">Показать жалобы</button>
+        <button class="btn wide">Открыть</button>
       </form>
       <div class="setup"></div>
+      <div class="shop-queue"></div>
       <div class="queue"></div>
       <div class="chat-queue"></div>
       <div class="review-queue"></div>
@@ -59,6 +60,70 @@ export default function admin({ root, alive }) {
     </article>`;
   });
   const reviewBox = $('.review-queue', root);
+
+  const shopBox = $('.shop-queue', root);
+  const shopStates = { approved: 'Открыт', closed: 'Закрыт' };
+
+  const shopCard = (s) => {
+    const button = (action, text, cls = 'ghost') =>
+      `<button type="button" class="btn small ${cls}" data-shop="${s.id}" data-rev="${s.rev}" data-action-shop="${action}">${text}</button>`;
+    const reason = '<input class="input" data-reason maxlength="200" placeholder="Причина, её увидит пользователь" aria-label="Причина">';
+    return `<article class="my">
+      <div class="my-main">${shopLogo(s)}
+        <span><strong>${esc(s.name)}</strong>
+          <small>${esc(s.person || '')}, логин ${esc(s.login || '')}, объявлений: ${s.ads}</small>
+          <small>${esc([cityName(s.city), s.address, s.hours].filter(Boolean).join(', '))}</small>
+          <small>${esc(phoneText(s.phone))}</small></span></div>
+      <p class="desc">${esc(s.about)}</p>
+      ${s.status === 'pending' ? '' : `<p class="muted small">${shopStates[s.status]}${s.note ? `: ${esc(s.note)}` : ''}</p>`}
+      ${s.status === 'closed' ? '' : reason}
+      <div class="my-actions">${
+        s.status === 'pending'
+          ? button('approve', 'Открыть магазин', '') + button('reject', 'Отклонить')
+          : s.status === 'approved'
+            ? `<a class="btn small ghost" href="/shop/${s.id}">Страница</a>${button('close', 'Закрыть', 'danger')}`
+            : button('reopen', 'Открыть снова')
+      }</div>
+    </article>`;
+  };
+
+  async function loadShops() {
+    const { items } = await api('/admin/shops', { headers: headers() });
+    if (!alive()) return;
+    const waiting = items.filter((s) => s.status === 'pending');
+    const decided = items.filter((s) => s.status !== 'pending');
+    shopBox.innerHTML = `<h2>Заявки на магазины${waiting.length ? ` (${waiting.length})` : ''}</h2>
+      ${waiting.length ? waiting.map(shopCard).join('') : '<p class="muted">Новых заявок нет.</p>'}
+      ${decided.length ? `<details><summary>Магазины: ${decided.length}</summary>${decided.map(shopCard).join('')}</details>` : ''}`;
+  }
+
+  shopBox.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-action-shop]');
+    if (!btn) return;
+    const { shop, rev, actionShop: action } = btn.dataset;
+    const note = btn.closest('.my').querySelector('[data-reason]')?.value.trim() ?? '';
+    if (['reject', 'close'].includes(action)) {
+      if (!note) {
+        btn.closest('.my').querySelector('[data-reason]').focus();
+        return toast('Напишите причину');
+      }
+      if (action === 'close' && !btn.dataset.sure) {
+        btn.dataset.sure = '1';
+        btn.textContent = 'Точно?';
+        return;
+      }
+    }
+    btn.disabled = true;
+    try {
+      await api(`/admin/shops/${shop}`, { method: 'POST', body: { action, rev: Number(rev), note }, headers: headers() });
+      await loadShops();
+    } catch (err) {
+      btn.disabled = false;
+      toast(errorText(err));
+      // заявку успели изменить или удалить: показываем, как она выглядит сейчас
+      if (['shop_changed', 'not_found'].includes(err.code)) await loadShops().catch(() => {});
+    }
+  });
 
   async function loadReviews() {
     const { items } = await api('/admin/reviews', { headers: headers() });
@@ -157,7 +222,7 @@ export default function admin({ root, alive }) {
       if (!alive()) return;
       form.hidden = true;
       if (!adminPass && !setup.innerHTML) offerCode();
-      queue.innerHTML = items.length
+      queue.innerHTML = `<h2>Жалобы на объявления</h2>${items.length
         ? items
             .map(
               (i) => `<article class="my">
@@ -177,7 +242,8 @@ export default function admin({ root, alive }) {
               </article>`
             )
             .join('')
-        : '<p class="muted">Жалоб нет.</p>';
+        : '<p class="muted">Жалоб нет.</p>'}`;
+      await loadShops();
       await loadComplaints();
       await loadReviews();
     } catch (e) {

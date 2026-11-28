@@ -56,16 +56,15 @@ const passwordField = (name, label, autocomplete, hint) =>
 
 // Отметки о согласии: по умолчанию пустые, без каждой из них регистрация не проходит.
 const AGREE = ['agreeOffer', 'agreeData', 'agreeAge'];
-const DOC_OF = { agreeOffer: 'offer', agreeData: 'consent', agreePolicy: 'privacy' };
+const DOC_OF = { agreeOffer: 'offer', agreeData: 'consent', agreeShop: 'consent', agreePolicy: 'privacy' };
 
 // Часть строки в фигурных скобках становится ссылкой на документ. Открывается рядом, чтобы не потерять набранное.
 const withLink = (name) =>
   esc(t(name)).replace(/\{(.+?)\}/, (_, text) => `<a href="/${DOC_OF[name]}" target="_blank" rel="noopener">${text}</a>`);
 
-const agreeBoxes = () =>
-  `<div class="agree">${AGREE.map(
-    (name) => `<div data-field="${name}"><label class="check"><input type="checkbox" name="${name}"><span>${withLink(name)}</span></label><em></em></div>`
-  ).join('')}<p class="muted small">${withLink('agreePolicy')}</p></div>`;
+export const agreeBox = (name) =>
+  `<div data-field="${name}"><label class="check"><input type="checkbox" name="${name}"><span>${withLink(name)}</span></label><em></em></div>`;
+const agreeBoxes = () => `<div class="agree">${AGREE.map(agreeBox).join('')}<p class="muted small">${withLink('agreePolicy')}</p></div>`;
 
 function showPassword(eye, visible) {
   const input = eye.previousElementSibling;

@@ -34,3 +34,15 @@ export function askDeleteListing(onYes) {
     onYes();
   };
 }
+
+// Свой магазин: открытый удаляют, неоткрытую заявку отзывают.
+export function askRemoveShop(open, onYes) {
+  const s = sheet(
+    `<p>${esc(t(open ? 'shopRemoveHint' : 'shopWithdrawHint'))}</p><button class="btn wide danger">${esc(t(open ? 'shopRemove' : 'shopWithdraw'))}</button>`,
+    { title: t(open ? 'shopRemoveAsk' : 'shopWithdrawAsk') }
+  );
+  $('button.danger', s.body).onclick = () => {
+    s.close();
+    onYes();
+  };
+}

@@ -33,6 +33,7 @@ export default async function seller({ root, params, alive, back, rerender }) {
       <span class="avatar" aria-hidden="true">${initial(info.name)}</span>
       <div><h2>${esc(info.name)}</h2><p>${esc(sinceText(info.since))}</p><p>${esc(adsCount(info.count))}</p></div>
       ${info.verified ? verifiedBadge() : ''}
+      ${info.shop ? `<a class="btn ghost wide" href="/shop/${info.shop.id}">${icon('store')}${esc(t('shopGo'))}: ${esc(info.shop.name)}</a>` : ''}
       ${
         info.reviews
           ? `<p class="rating">${stars(info.rating)}<b>${esc(ratingText(info.rating))}</b><span>${esc(reviewsCount(info.reviews))}</span></p>`

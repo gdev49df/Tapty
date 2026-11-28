@@ -113,7 +113,7 @@ export async function listListings(env, url) {
 const LIVE = "status = 'active' AND expires_at > ?";
 
 // Сколько у продавца активных объявлений, с какого момента он на tapty и что о нём пишут.
-async function sellerInfo(env, owner) {
+export async function sellerInfo(env, owner) {
   const [row, marks] = await Promise.all([
     env.DB.prepare(`SELECT MIN(created_at) AS since, SUM(${LIVE}) AS count FROM listings WHERE owner = ?`).bind(now(), owner).first(),
     rating(env, owner),
@@ -201,15 +201,25 @@ async function similar(env, row, skip) {
 export async function sellerPage(env, id, { owner }) {
   const row = await findRow(env, id);
   if (row.status === 'hidden') fail(404, 'not_found');
-  const [info, { results }, reviews] = await Promise.all([
+  const [info, items, reviews, shop] = await Promise.all([
     sellerInfo(env, row.owner),
-    env.DB.prepare(`SELECT ${CARD} FROM listings WHERE ${LIVE} AND owner = ? ORDER BY bumped_at DESC, id DESC LIMIT 100`)
-      .bind(now(), row.owner)
-      .all(),
+    sellerAds(env, row.owner),
     sellerReviews(env, row.owner, owner),
+    shopOf(env, row.owner),
   ]);
-  return json({ seller: { name: row.name, ...info }, items: results.map(card), reviews });
+  return json({ seller: { name: row.name, ...info, shop }, items, reviews });
 }
+
+export async function sellerAds(env, owner) {
+  const { results } = await env.DB.prepare(`SELECT ${CARD} FROM listings WHERE ${LIVE} AND owner = ? ORDER BY bumped_at DESC, id DESC LIMIT 100`)
+    .bind(now(), owner)
+    .all();
+  return results.map(card);
+}
+
+// Открытый магазин продавца для подписи в объявлении; null, если его нет.
+const shopOf = (env, owner) =>
+  env.DB.prepare("SELECT id, name, NULLIF(logo, '') AS logo FROM shops WHERE owner = ? AND status = 'approved'").bind(owner).first();
 
 async function findRow(env, id) {
   const row = await env.DB.prepare('SELECT * FROM listings WHERE id = ?').bind(id).first();
@@ -234,10 +244,10 @@ export async function getListing(env, ctx, id, { owner, ip }) {
       )
     );
   }
-  const [seller, same] = await Promise.all([sellerInfo(env, row.owner), sameItems(env, row)]);
+  const [seller, same, shop] = await Promise.all([sellerInfo(env, row.owner), sameItems(env, row), shopOf(env, row.owner)]);
   const more = await similar(env, row, new Set(same.map((i) => i.id)));
   // Сам номер отдаётся только по нажатию «Связаться». Написать в чат можно только продавцу с аккаунтом.
-  return json({ item: { ...detail(row), mine, chat: row.owner.startsWith('u:') }, seller, same, similar: more });
+  return json({ item: { ...detail(row), mine, chat: row.owner.startsWith('u:') }, seller: { ...seller, shop }, same, similar: more });
 }
 
 // Номер для звонка виден всем, а ссылки, чтобы написать, — только вошедшим.
@@ -329,7 +339,7 @@ async function checkPhotos(env, ids, owner, listingId) {
   if (!ids.length) return;
   const { results } = await env.DB.prepare(
     `SELECT id FROM photos WHERE id IN (${ids.map(() => '?').join(',')}) AND owner = ?
-     AND chat_id IS NULL AND (listing_id IS NULL OR listing_id = ?)`
+     AND chat_id IS NULL AND shop_id IS NULL AND (listing_id IS NULL OR listing_id = ?)`
   )
     .bind(...ids, owner, listingId)
     .all();
@@ -492,6 +502,9 @@ export async function banSeller(env, owner, phone = '') {
     env.DB.prepare('INSERT OR IGNORE INTO bans (value, created_at) SELECT DISTINCT phone, ? FROM listings WHERE owner = ?').bind(t, owner),
     env.DB.prepare("INSERT OR IGNORE INTO bans (value, created_at) SELECT ?1, ?2 WHERE ?1 != ''").bind(phone, t),
     env.DB.prepare("UPDATE listings SET status = 'hidden', approved = 0 WHERE owner = ?1 OR phone = ?2").bind(owner, phone),
+    env.DB.prepare(
+      "UPDATE shops SET status = 'closed', note = 'Аккаунт заблокирован', updated_at = ?, rev = rev + 1 WHERE owner = ? AND status != 'closed'"
+    ).bind(t, owner),
   ]);
 }
 

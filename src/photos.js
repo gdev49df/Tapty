@@ -106,7 +106,7 @@ export async function deletePhotos(env, ids) {
 // Незавершённые черновики: фото без объявления старше двух суток.
 export async function deleteOrphans(env) {
   const { results } = await env.DB.prepare(
-    'SELECT id FROM photos WHERE listing_id IS NULL AND chat_id IS NULL AND created_at < ? LIMIT 40'
+    'SELECT id FROM photos WHERE listing_id IS NULL AND chat_id IS NULL AND shop_id IS NULL AND created_at < ? LIMIT 40'
   )
     .bind(now() - 2 * DAY)
     .all();

@@ -18,7 +18,7 @@ function draw() {
         <a href="/new" class="btn ghost">${esc(t('postAd'))}</a>
       </div>
       ${column(t('forBuyers'), [['/', t('allAds')], ['/fav', t('fav')], ['/chats', t('messages')]])}
-      ${column(t('forSellers'), [['/new', t('postAd')], ['/me', t('myAds')]])}
+      ${column(t('forSellers'), [['/new', t('postAd')], ['/me', t('myAds')], ['/shop', t('shopOpen')]])}
       ${column(t('help'), [['/rules', t('rules')], ['/offer', t('doc_offer')], ['/privacy', t('doc_privacy')], ['/consent', t('doc_consent')]])}
       <p class="foot-credit">Разработано gDev</p>
     </div>`;

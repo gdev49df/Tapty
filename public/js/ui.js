@@ -28,6 +28,10 @@ export const wasCheaper = (item) => item.oldPrice > item.price && ['fixed', 'bar
 export const ratingText = (n) => String(n.toFixed(1)).replace('.', ',');
 
 export const verifiedBadge = () => `<span class="verified">${icon('verified')}${esc(t('verified'))}</span>`;
+export const shopBadge = () => `<span class="verified">${icon('store')}${esc(t('shop'))}</span>`;
+// Логотип магазина; без картинки — первая буква названия.
+export const shopLogo = (shop) =>
+  `<span class="avatar" aria-hidden="true">${shop.logo ? `<img src="/p/${shop.logo}/t" alt="">` : initial(shop.name)}</span>`;
 
 // Пять звёзд, из которых закрашено столько, сколько поставили.
 export const stars = (n) =>

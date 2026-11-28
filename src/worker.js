@@ -7,6 +7,7 @@ import { SESSION_DAYS, changePassword, deleteAccount, recover, register, replace
 import * as chat from './chat.js';
 import * as reviews from './reviews.js';
 import * as favorites from './favorites.js';
+import * as shops from './shops.js';
 import { draftFromPhoto } from './ai.js';
 import { CITIES } from '../public/js/catalog.js';
 
@@ -120,6 +121,13 @@ async function api(request, env, ctx, url) {
     if (method === 'POST' && m[2] === '/report') return listings.reportListing(request, env, id, who);
     if (method === 'POST' && m[2] === '/status') return listings.setStatus(request, env, id, who);
   }
+  if (path === '/shop') {
+    if (method === 'GET') return shops.getMyShop(env, who);
+    if (method === 'PUT') return shops.saveShop(request, env, who);
+    if (method === 'DELETE') return shops.deleteShop(env, who);
+  }
+  if (method === 'GET' && (m = /^\/shops\/(\d{1,12})$/.exec(path))) return shops.shopPage(env, Number(m[1]), who);
+  if (method === 'POST' && (m = /^\/shops\/(\d{1,12})\/contact$/.exec(path))) return shops.shopContact(env, Number(m[1]), who);
   if (method === 'GET' && path === '/mine') return listings.listMine(env, who);
   if (method === 'GET' && (m = /^\/mine\/(\d{1,12})$/.exec(path))) return listings.getMine(env, Number(m[1]), who);
   if (method === 'POST' && path === '/photos') {
@@ -134,6 +142,8 @@ async function api(request, env, ctx, url) {
     if (method === 'GET' && path === '/admin/complaints') return chat.adminComplaints(env);
     if (method === 'GET' && (m = /^\/admin\/chat-photos\/([a-f0-9]{24})$/.exec(path))) return chat.adminChatPhoto(env, m[1]);
     if (method === 'POST' && (m = /^\/admin\/complaints\/(\d{1,12})$/.exec(path))) return chat.adminComplaint(request, env, Number(m[1]));
+    if (method === 'GET' && path === '/admin/shops') return shops.adminShops(env);
+    if (method === 'POST' && (m = /^\/admin\/shops\/(\d{1,12})$/.exec(path))) return shops.adminShop(request, env, Number(m[1]));
     if (method === 'GET' && path === '/admin/reviews') return reviews.adminReviews(env);
     if (method === 'DELETE' && (m = /^\/admin\/reviews\/(\d{1,12})$/.exec(path))) {
       return reviews.adminDeleteReview(env, Number(m[1]));
