@@ -9,6 +9,8 @@ import { createHash, randomBytes, createHmac } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { localConfigs } from './local.mjs';
 import { parseDraft } from '../src/ai.js';
+import { basicFilters, cleanFilters, parseFilters } from '../src/assistant.js';
+import { risks, warnings } from '../public/js/safety.js';
 import { LEGAL_VERSION } from '../public/js/catalog.js';
 import { insecure, network } from '../src/util.js';
 import { codeAt, secretBytes } from '../src/totp.js';
@@ -379,6 +381,118 @@ try {
     assert.equal(await set(60000), 0);
     assert.equal(await set(0, 'free'), 0);
     assert.equal(await set(100), 0);
+  });
+
+  await test('помощник поиска: разбор просьбы без нейросети', async () => {
+    const parsed = (text) => {
+      const f = basicFilters(text);
+      return Object.fromEntries(Object.entries(f).filter(([, v]) => (Array.isArray(v) ? v.length : v)));
+    };
+    assert.deepEqual(parsed('Ноутбук для учёбы до 150 000 в Астане'), { words: ['ноутбук', 'учебы'], city: 'astana', max: 150000 });
+    assert.deepEqual(parsed('Қарағандыда 50 мыңға дейін диван'), { words: ['диван'], city: 'karaganda', max: 50000 });
+    assert.deepEqual(parsed('что-нибудь для ребенка даром'), { words: ['ребенка'], type: 'free' });
+    const semey = parsed('в Семее новый iphone за 1,5 млн');
+    assert.deepEqual([semey.city, semey.max, semey.cond, semey.words], ['semey', 1500000, 'new', ['iphone']]);
+    assert.equal(parsed('семейный палатка').city, undefined);
+    assert.equal(parsed('игрушки от 2 лет').min, undefined);
+    assert.equal(parsed('диван б/у недорого').cond, 'used');
+    assert.equal(parsed('диван б/у недорого').sort, 'cheap');
+
+    assert.equal(parseFilters('не знаю'), null);
+    assert.equal(parseFilters('{сломано'), null);
+    const odd = cleanFilters({ words: [' Диван! ', 'купить', 5, 'а'], cat: 'x', city: 'paris', min: 900, max: '5', cond: 'old', type: 'sale' });
+    assert.deepEqual(odd, { words: ['диван'], cat: '', city: '', min: 900, max: null, cond: '', type: '', sort: '' });
+    assert.deepEqual([cleanFilters({ min: 500, max: 100 }).min, cleanFilters(null).words], [100, []]);
+  });
+
+  await test('помощник поиска: нейросеть, запасной разбор и пределы', async () => {
+    const seller = await signUp('Самокаты');
+    const scooter = await create(seller, { title: 'Самокат складной', description: 'Для взрослых', phone: '77030000011', price: 42000, category: 'kids' });
+    const helmet = await create(seller, { title: 'Шлем защитный', description: 'Подойдёт под самокат', phone: '77030000011', price: 7000, category: 'kids' });
+    const ask = (body, options = {}) => call('/api/ai/search', { method: 'POST', body, ...options });
+
+    // нейросеть переводит задачу в слова; невозможную цену снимает сам поиск и говорит об этом
+    const smart = await ask({ text: 'на чём ехать на работу', lang: 'ru' });
+    assert.equal(smart.status, 200, JSON.stringify(smart.data));
+    assert.deepEqual([smart.data.ai, smart.data.filters.cat, smart.data.relaxed], [true, '', ['price']]);
+    const ids = smart.data.items.map((i) => i.id);
+    assert.ok(ids.includes(scooter) && ids.includes(helmet));
+    assert.equal(smart.data.items[0].phone, undefined);
+
+    // названная цифрами цена важнее разобранной моделью
+    const bounded = await ask({ text: 'на чём ехать до 50 000' });
+    assert.deepEqual([bounded.data.filters.max, bounded.data.relaxed], [50000, []]);
+
+    // уточнение сохраняет прежние условия
+    const refined = await ask({ text: 'подешевле', filters: bounded.data.filters });
+    assert.deepEqual([refined.data.filters.words, refined.data.filters.sort], [['самокат', 'велосипед'], 'cheap']);
+    const prices = refined.data.items.map((i) => i.price);
+    assert.deepEqual(prices, [...prices].sort((a, b) => a - b));
+
+    // убранное условие ищется без нейросети
+    const again = await ask({ filters: { ...bounded.data.filters, max: null } });
+    assert.deepEqual([again.data.ai, again.data.filters.max], [null, null]);
+
+    // модель недоступна или отвечает не по делу — ищем по словам
+    for (const text of ['сломайся самокат', 'болтай самокат']) {
+      const plain = await ask({ text });
+      assert.equal(plain.data.ai, false, text);
+      assert.ok(plain.data.items.some((i) => i.id === scooter), text);
+    }
+    // другое окончание не мешает
+    assert.ok((await ask({ text: 'болтай самокаты' })).data.items.some((i) => i.id === scooter));
+    // совпадение в названии выше, чем в описании
+    const order = (await ask({ text: 'болтай самокат' })).data.items.map((i) => i.id);
+    assert.ok(order.indexOf(scooter) < order.indexOf(helmet));
+
+    const unclear = await ask({ text: 'какая сегодня погода', city: 'astana' });
+    assert.deepEqual([unclear.data.unclear, unclear.data.items], [true, []]);
+    assert.equal((await ask({ text: 'я' })).status, 400);
+    assert.equal((await ask({ text: 'д'.repeat(201) })).status, 400);
+    assert.equal((await ask({})).status, 400);
+    assert.equal((await ask({ filters: {} })).status, 400);
+    assert.equal((await call('/api/ai/search')).status, 404);
+
+    // свой дневной предел нейросети у каждого, поиск после него работает дальше
+    const token = await signUp('Любопытный');
+    const options = { token, headers: { 'cf-connecting-ip': '192.0.2.70' } };
+    for (let i = 0; i < 30; i++) assert.equal((await ask({ text: 'на чём ехать' }, options)).data.ai, true);
+    const over = await ask({ text: 'самокат' }, options);
+    assert.deepEqual([over.data.ai, over.data.items.length > 0], [false, true]);
+  });
+
+  await test('предупреждения в переписке: что считается похожим на обман', async () => {
+    const cases = [
+      ['Переведите предоплату, и я отложу', ['money']],
+      ['нужен задаток 5000', ['money']],
+      ['Скиньте на каспи, отправлю такси', ['money']],
+      ['Алдын ала төлем керек', ['money']],
+      ['ақша жіберіңіз', ['money']],
+      ['Скажите код из смс', ['code']],
+      ['Вам придёт код, пришлите мне', ['code']],
+      ['кодты жіберіңізші', ['code']],
+      ['4111 1111 1111 1111', ['card']],
+      ['KZ86 125K ZT50 0410 0100', ['card']],
+      ['Оплатите тут: https://kaspi-pay.top/x', ['link']],
+      ['зайдите на olx-dostavka.kz', ['link']],
+      ['Без предоплаты, смотрите на месте', []],
+      ['Предоплата не нужна', []],
+      ['Можно каспи переводом', []],
+      ['Могу задать вопрос?', []],
+      ['Мой номер +7 701 123 45 67', []],
+      ['Штрих-код пришлите и промокод скажите', []],
+      ['Вот объявление https://tapty.gdev.uk/item/5 и 2gis.kz/astana', []],
+      ['Цена 150.000 тг, ул. Абая д.5', []],
+      ['Здравствуйте! Ещё продаёте?', []],
+    ];
+    for (const [text, expected] of cases) assert.deepEqual(risks(text), expected, text);
+    const shown = warnings([
+      { id: 1, mine: false, text: 'предоплата 100%' },
+      { id: 2, mine: true, text: 'скажите код из смс' },
+      { id: 3, mine: false, text: 'предоплата, на карту 4111111111111111' },
+      { id: 4, mine: false, text: 'предоплата', photo: 'x' },
+    ]);
+    assert.deepEqual([...shown], [[3, ['card', 'money']]]);
   });
 
   await test('районы: только из списка своего города, фильтр', async () => {

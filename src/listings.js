@@ -11,7 +11,7 @@ import { matcher, stopWords } from './site.js';
 
 const PAGE = 20;
 const HIDE_AFTER_REPORTS = 5;
-const CARD = 'id, title, price, price_type, city, area, district, condition, photos, bumped_at, old_price';
+export const CARD = 'id, title, price, price_type, city, area, district, condition, photos, bumped_at, old_price';
 const priced = (type) => type === 'fixed' || type === 'bargain';
 
 export const parsePhotos = (row) => {
@@ -22,7 +22,7 @@ export const parsePhotos = (row) => {
   }
 };
 
-const card = (row) => ({
+export const card = (row) => ({
   id: row.id,
   title: row.title,
   price: row.price,

@@ -181,12 +181,12 @@ export function cardHtml(item) {
   const on = favorites.has(item.id);
   const place = placeText(item);
   return `
-    <article class="card">
+    <article class="card${wasCheaper(item) ? ' drop' : ''}">
       <span class="card-photo">${
         item.photo
           ? `<img src="/p/${item.photo}/t" alt="" loading="lazy" decoding="async">`
           : icon('camera', 'ph')
-      }</span>
+      }${wasCheaper(item) ? `<b class="drop-badge">${esc(t('priceDown'))}</b>` : ''}</span>
       <div class="card-head">
         <h3><a href="/item/${item.id}">${esc(item.title)}</a></h3>
         <button class="heart" data-fav="${item.id}" aria-pressed="${on}" aria-label="${esc(t(on ? 'fromFav' : 'toFav'))}">${icon('heart')}</button>

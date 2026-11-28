@@ -7,6 +7,7 @@ import { icon } from './icons.js';
 import { $, $$, closeSheet, errorText, esc, toast } from './ui.js';
 import home from './pages/home.js';
 import search from './pages/search.js';
+import assistant from './pages/assistant.js';
 import item from './pages/item.js';
 import post from './pages/post.js';
 import fav from './pages/fav.js';
@@ -33,6 +34,7 @@ if (location.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includ
 const ROUTES = [
   [/^\/$/, home, 'home'],
   [/^\/search$/, search, 'home'],
+  [/^\/assistant$/, assistant, 'home'],
   [/^\/new$/, post, 'new'],
   [/^\/edit\/(\d+)$/, post, 'me'],
   [/^\/item\/(\d+)$/, item, ''],

@@ -34,12 +34,13 @@ export async function signOut() {
   // Черновик и контакты принадлежат вышедшему человеку.
   store.del('seller');
   store.del('draft');
+  store.del('seen');
   dropSession();
 }
 
 // Аккаунт удалён: на устройстве не остаётся ничего из того, что с ним связано.
 export function forgetAccount() {
-  for (const name of ['seller', 'draft', 'key']) store.del(name);
+  for (const name of ['seller', 'draft', 'seen', 'key']) store.del(name);
   // и сохранённые для работы без интернета объявления и фото
   globalThis.caches
     ?.keys()

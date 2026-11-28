@@ -66,25 +66,18 @@ export function parseDraft(answer) {
   };
 }
 
-async function run(env, image, lang) {
+// Один вопрос модели: ответ текстом или ошибка, если она молчит слишком долго.
+export async function askModel(env, content, { tokens, timeout: wait = TIMEOUT_MS }) {
   let timer;
   const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error('timeout')), TIMEOUT_MS);
+    timer = setTimeout(() => reject(new Error('timeout')), wait);
   });
   try {
     const result = await Promise.race([
       env.AI.run(MODEL, {
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: prompt(lang) },
-              { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${toBase64(image)}` } },
-            ],
-          },
-        ],
+        messages: [{ role: 'user', content }],
         chat_template_kwargs: { enable_thinking: false },
-        max_completion_tokens: 600,
+        max_completion_tokens: tokens,
         temperature: 0.2,
       }),
       timeout,
@@ -95,8 +88,18 @@ async function run(env, image, lang) {
   }
 }
 
+const run = (env, image, lang) =>
+  askModel(
+    env,
+    [
+      { type: 'text', text: prompt(lang) },
+      { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${toBase64(image)}` } },
+    ],
+    { tokens: 600 }
+  );
+
 // Последний сбой остаётся в базе (таблица meta), чтобы причину можно было посмотреть.
-const remember = (env, text) =>
+export const remember = (env, text) =>
   env.DB.prepare(
     "INSERT INTO meta (key, value) VALUES ('ai_error', ?1) ON CONFLICT(key) DO UPDATE SET value = ?1"
   )

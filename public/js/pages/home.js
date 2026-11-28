@@ -1,6 +1,8 @@
 import { api } from '../api.js';
 import { CATEGORIES } from '../catalog.js';
 import { label, t } from '../i18n.js';
+import { icon } from '../icons.js';
+import { seenStrip } from '../recent.js';
 import { store } from '../store.js';
 import { $, $$, closeSheet, emptyState, esc, feed, sheet } from '../ui.js';
 
@@ -36,6 +38,8 @@ export default function home({ root, alive, onLeave, restored }) {
       ${main.map((c) => tile(c, cat)).join('')}
       <button class="cat" data-more aria-haspopup="dialog" aria-current="${hidden(cat)}">${art('other')}${esc(label(CATEGORIES.find((c) => c.id === 'other')))}</button>
     </div>
+    <a class="ask" href="/assistant">${icon('bot')}<span><strong>${esc(t('aiTitle'))}</strong><small>${esc(t('aiTeaser'))}</small></span>${icon('next')}</a>
+    <section class="seen" hidden></section>
     <div class="feed-head"><h1></h1><span></span></div>
     <div class="feed"></div>`;
 
@@ -66,6 +70,9 @@ export default function home({ root, alive, onLeave, restored }) {
   };
   start();
   onLeave(() => stop());
+  // при выбранной категории недавние только мешали бы
+  const recent = $('.seen', root);
+  seenStrip(recent, () => alive() && !cache.cat);
 
   const cats = $('.cats', root);
   // Повторное нажатие на выбранную категорию снимает фильтр.
@@ -74,6 +81,7 @@ export default function home({ root, alive, onLeave, restored }) {
     cache = { city, cat: value, state: { items: [], next: 0 } };
     $$('[data-cat]', cats).forEach((b) => b.setAttribute('aria-pressed', b.dataset.cat === value));
     $('[data-more]', cats).setAttribute('aria-current', hidden(value));
+    recent.hidden = Boolean(value) || !recent.childElementCount;
     start();
   };
   // после возврата на главную выбранная плитка снова на виду

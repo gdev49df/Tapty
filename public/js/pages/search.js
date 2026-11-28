@@ -26,6 +26,7 @@ export default function search({ root, query, alive, onLeave, go, restored }) {
   root.innerHTML = `
     <h1 class="sr-only">${esc(t('search'))}</h1>
     <div class="chips">
+      <a class="chip chip-ask" href="/assistant">${icon('bot')}${esc(t('aiTitle'))}</a>
       ${chip('cat', catName(), filters.cat)}
       ${chip('sort', sorts.find((s) => s.value === filters.sort)?.label || t('sortNew'), filters.sort)}
     </div>
@@ -53,7 +54,11 @@ export default function search({ root, query, alive, onLeave, go, restored }) {
     stop = feed($('.feed', root), (offset) => api(`/listings?${new URLSearchParams({ ...filters, offset })}`), {
       alive: () => alive() && mine === run,
       state: cache.state,
-      empty: emptyState(t('emptySearch'), t('emptySearchHint')),
+      empty: emptyState(
+        t('emptySearch'),
+        t('emptySearchHint'),
+        `<a class="btn ghost" href="/assistant${filters.q ? `?q=${encodeURIComponent(filters.q)}` : ''}">${icon('bot')}${esc(t('aiTitle'))}</a>`
+      ),
     });
   };
   start(restored);

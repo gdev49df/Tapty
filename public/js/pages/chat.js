@@ -8,6 +8,7 @@ import { t } from '../i18n.js';
 import { askDeleteChat } from '../dialogs.js';
 import { reviewForm } from '../reviews.js';
 import { refreshUnread } from '../unread.js';
+import { warnings } from '../safety.js';
 import { openViewer } from '../viewer.js';
 import { $, $$, dateText, emptyState, errorText, esc, money, priceText, priceWords, sheet, timeText, toast } from '../ui.js';
 
@@ -108,16 +109,24 @@ export default async function chatPage({ root, params, alive, back, go, rerender
     return `<p>${esc(m.kind ? priceWords(m.kind, m.amount) : m.text)}</p>`;
   };
 
+  // Под сообщением собеседника, которое похоже на обман, — что с этим делать.
+  const warnHtml = (kinds) => `<div class="msg-warn" role="note">${icon('shield')}<div>
+      ${kinds.map((k) => `<p>${esc(t(`warn_${k}`))}</p>`).join('')}
+      <button type="button" class="link-btn" data-complain>${esc(t('complain'))}</button>
+    </div></div>`;
+
   function draw() {
     let day = '';
     const lastMine = [...messages].reverse().find((m) => m.mine);
+    const risky = warnings(messages);
     list.innerHTML = messages
       .map((m) => {
         const date = dateText(m.at);
         const divider = date === day ? '' : `<p class="day">${esc(date)}</p>`;
         day = date;
         const state = m === lastMine ? `, ${t(m.id <= read ? 'read' : 'sent').toLowerCase()}` : '';
-        return `${divider}<div class="msg${m.mine ? ' mine' : ''}">${bodyHtml(m)}<small>${esc(timeText(m.at) + state)}</small></div>`;
+        const warn = risky.has(m.id) ? warnHtml(risky.get(m.id)) : '';
+        return `${divider}<div class="msg${m.mine ? ' mine' : ''}">${bodyHtml(m)}<small>${esc(timeText(m.at) + state)}</small></div>${warn}`;
       })
       .join('');
     $$('[data-photo]', list).forEach(async (button) => {
@@ -131,6 +140,7 @@ export default async function chatPage({ root, params, alive, back, go, rerender
   }
 
   list.addEventListener('click', async (e) => {
+    if (e.target.closest('[data-complain]')) return askComplaint();
     const reply = e.target.closest('[data-answer]');
     if (reply) return answer(reply);
     const button = e.target.closest('[data-photo]');

@@ -5,6 +5,7 @@ import { icon } from '../icons.js';
 import { adsCount, label, reviewsCount, t, viewsCount } from '../i18n.js';
 import { favorites } from '../favorites.js';
 import { openViewer } from '../viewer.js';
+import { seen } from '../recent.js';
 import { $, $$, areaName, cardHtml, cityName, copyText, dateText, emptyState, errorText, esc, initial, money, phoneText, placeText, priceText, ratingText, sheet, shopBadge, shopLogo, sinceText, stars, toast, verifiedBadge, wasCheaper, hiddenWhy, reviewNote } from '../ui.js';
 
 export default async function itemPage({ root, params, alive, back, go, rerender }) {
@@ -25,6 +26,8 @@ export default async function itemPage({ root, params, alive, back, go, rerender
     return;
   }
   if (!alive()) return;
+  // своё объявление в «недавно смотрели» ни к чему
+  if (item.status === 'active' && !item.mine) seen.add(id);
 
   const on = favorites.has(id);
   const category = CATEGORIES.find((c) => c.id === item.category);

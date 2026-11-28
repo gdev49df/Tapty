@@ -8,9 +8,25 @@ const GOOD = {
   condition: 'used',
 };
 
+const answer = (value) => ({ choices: [{ message: { content: '```json\n' + JSON.stringify(value) + '\n```' } }] });
+
+function search(model, prompt) {
+  if (!model.startsWith('@cf/')) throw new Error('неверный запрос к модели');
+  const asked = JSON.parse(prompt.slice(prompt.lastIndexOf('Просьба: ') + 'Просьба: '.length));
+  if (asked.includes('сломайся')) throw new Error('модель недоступна');
+  if (asked.includes('болтай')) return { response: 'Конечно, помогу!' };
+  if (asked.includes('погода')) return answer({ words: [] });
+  if (asked.includes('на чём ехать')) return answer({ words: ['самокат', 'велосипед'], cat: 'нет такой', city: 'astana', max: 1 });
+  if (asked.includes('подешевле')) return answer({ words: [], sort: 'cheap' });
+  return { response: 'не JSON' };
+}
+
 export class MockAI extends WorkerEntrypoint {
   async run(model, input) {
-    const [text, image] = input.messages[0].content;
+    const { content } = input.messages[0];
+    // строка вместо списка — это помощник поиска: что ответить, решают слова в просьбе
+    if (typeof content === 'string') return search(model, content);
+    const [text, image] = content;
     if (!model.startsWith('@cf/') || text.type !== 'text' || !image.image_url.url.startsWith('data:image/jpeg;base64,')) {
       throw new Error('неверный запрос к модели');
     }

@@ -12,6 +12,7 @@ import * as panel from './panel.js';
 import { getSettings, publicConfig, saveSettings, siteSettings } from './site.js';
 import { liftExpired, liftSometimes } from './bans.js';
 import { draftFromPhoto } from './ai.js';
+import { assist } from './assistant.js';
 import { CITIES } from '../public/js/catalog.js';
 
 let salt = null;
@@ -107,6 +108,7 @@ async function api(request, env, ctx, url) {
   }
 
   if (method === 'POST' && path === '/ai/draft') return draftFromPhoto(request, env, url, who);
+  if (method === 'POST' && path === '/ai/search') return assist(request, env, who);
 
   if (path === '/listings') {
     if (method === 'GET') return listings.listListings(env, url);
