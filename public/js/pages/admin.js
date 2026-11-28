@@ -4,6 +4,7 @@
 import { icon } from '../icons.js';
 import { $, $$, esc, toast } from '../ui.js';
 import { access, failed, loading, openSession, problem, send } from '../admin/common.js';
+import { flashRows, leaveRows, play, pop, shake, snapshot, spin } from '../admin/motion.js';
 import overview from '../admin/overview.js';
 import queue from '../admin/queue.js';
 import listings from '../admin/listings.js';
@@ -79,7 +80,10 @@ export default async function admin({ root, query, alive, onLeave }) {
           access.pass = '';
           codeField.hidden = false;
           form.elements.code.focus();
-        } else toast(err.code === 'not_found' ? 'Сначала задайте секрет ADMIN_KEY' : problem(err));
+        } else {
+          shake(form);
+          toast(err.code === 'not_found' ? 'Сначала задайте секрет ADMIN_KEY' : problem(err));
+        }
       }
     };
   }
@@ -130,11 +134,21 @@ export default async function admin({ root, query, alive, onLeave }) {
 
     const paintSelection = () => $$('.adm-content [data-key]', root).forEach((el) => el.classList.toggle('selected', el.dataset.key === selected));
 
+    const hidePanel = () => {
+      side.hidden = true;
+      side.inert = false;
+      side.classList.remove('closing');
+      shell.classList.remove('with-panel');
+    };
+
+    // пока карточка уезжает, она inert и для кода уже закрыта
     const panel = {
       show(title) {
         const turnNow = ++panelTurn;
-        if (side.hidden) opener = document.activeElement;
+        if (side.hidden || side.inert) opener = document.activeElement;
         side.hidden = false;
+        side.inert = false;
+        side.classList.remove('closing');
         shell.classList.add('with-panel');
         document.documentElement.classList.add('adm-locked');
         $('h2', side).textContent = title;
@@ -142,15 +156,18 @@ export default async function admin({ root, query, alive, onLeave }) {
         side.focus({ preventScroll: true });
         return { body, alive: () => alive() && turnNow === panelTurn && !side.hidden };
       },
-      close() {
-        if (side.hidden) return;
-        panelTurn += 1;
-        side.hidden = true;
-        shell.classList.remove('with-panel');
+      // now — убрать сразу: раздел всё равно меняется целиком
+      close(now = false) {
+        if (side.hidden || (side.inert && !now)) return;
+        const turnNow = ++panelTurn;
+        side.inert = true;
         document.documentElement.classList.remove('adm-locked');
         selected = '';
         paintSelection();
         if (opener?.isConnected) opener.focus({ preventScroll: true });
+        if (now) return hidePanel();
+        side.classList.add('closing');
+        Promise.allSettled(side.getAnimations().map((a) => a.finished)).then(() => turnNow === panelTurn && hidePanel());
       },
     };
 
@@ -159,13 +176,16 @@ export default async function admin({ root, query, alive, onLeave }) {
       for (const id of COUNTED) {
         const mark = $(`[data-tab="${id}"] b`, root);
         if (!mark) continue;
+        const changed = !mark.hidden && mark.textContent !== String(data[id]);
         mark.textContent = data[id];
         mark.hidden = !data[id];
+        if (changed) pop(mark);
       }
       return data;
     }
 
-    async function render({ keep = false } = {}) {
+    // mode: new — раздел с нуля; switch — другой вид того же раздела; keep — список после действия
+    async function render({ mode = 'new' } = {}) {
       const id = ++turn;
       cleanups.forEach((fn) => fn());
       cleanups = [];
@@ -173,13 +193,17 @@ export default async function admin({ root, query, alive, onLeave }) {
       $('.adm-head h1', root).textContent = name;
       for (const b of $$('[data-tab]', root)) b.toggleAttribute('data-current', b.dataset.tab === tab);
       $('[data-current]', root).scrollIntoView({ block: 'nearest', inline: 'nearest' });
-      // после действия старый список остаётся на месте, пока не готов новый
       const old = $('.adm-content', root);
       const box = old.cloneNode(false);
-      if (!keep) {
+      box.classList.remove('waiting');
+      // появляется с движением только новое: после действия список не мигает
+      box.classList.toggle('enter', mode !== 'keep');
+      if (mode === 'new') {
         box.innerHTML = loading;
         old.replaceWith(box);
       }
+      // в остальных случаях старый список остаётся на месте, пока не готов новый
+      if (mode === 'switch') old.classList.add('waiting');
       const ctx = {
         box,
         alive: () => alive() && id === turn,
@@ -191,42 +215,58 @@ export default async function admin({ root, query, alive, onLeave }) {
           paintSelection();
         },
         open: (next) => go(next),
-        reload: () => render(),
+        reload: () => render({ mode: 'switch' }),
         // действие выполнено: карточка закрывается, список обновляется
         done: () => {
           panel.close();
-          render({ keep: true });
+          render({ mode: 'keep' });
         },
       };
       try {
         await section(ctx);
         if (!ctx.alive()) return;
-        if (keep) {
+        if (mode === 'keep') {
+          const before = snapshot(old);
+          await leaveRows(old, box);
+          if (!ctx.alive()) return;
           const at = window.scrollY;
           old.replaceWith(box);
           window.scrollTo(0, at);
+          flashRows(before, box);
+        } else {
+          if (mode === 'switch') old.replaceWith(box);
+          // всё появилось: дальше добавленное и перерисованное не должно прыгать заново
+          setTimeout(() => box.classList.remove('enter'), 1100);
         }
         paintSelection();
       } catch (e) {
-        if (ctx.alive()) failed(keep ? old : box, e, () => render());
+        if (!ctx.alive()) return;
+        old.classList.remove('waiting');
+        failed(mode === 'new' ? box : old, e, () => render());
       }
     }
 
     function go(next) {
       tab = next;
-      panel.close();
+      panel.close(true);
       history.replaceState(history.state, '', `/admin?tab=${tab}`);
       window.scrollTo(0, 0);
       render();
+      play($('.adm-head h1', root), [{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }]);
     }
 
     shell.addEventListener('click', (e) => {
       const button = e.target.closest('[data-tab]');
       if (button?.closest('.adm-nav')) go(button.dataset.tab);
-      if (e.target.closest('[data-refresh]')) {
-        panel.close();
+      const refresh = e.target.closest('[data-refresh]');
+      if (refresh) {
+        spin($('.i', refresh));
+        panel.close(true);
         render();
       }
+      // нажатый вид отмечается сразу, не дожидаясь списка
+      const view = e.target.closest('.adm-seg [data-view]');
+      if (view) $$('button', view.parentElement).forEach((b) => b.setAttribute('aria-pressed', b === view));
       if (e.target.closest('.adm-panel-head [data-close]')) panel.close();
       if (e.target.closest('[data-exit]')) {
         access.key = '';

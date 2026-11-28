@@ -221,3 +221,79 @@ blockquote { padding: 12px; background: var(--surface); border-radius: var(--r);
   .adm-panel { position: sticky; top: 0; z-index: 1; width: auto; height: 100dvh; box-shadow: none; }
   .adm-charts { grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); }
 }
+
+/* ---------- движение: только тем, кто не просил его убрать ---------- */
+@media (prefers-reduced-motion: no-preference) {
+  .adm-nav button, .adm-seg button, .adm-row, .adm-table tbody tr, .adm-waiting button, .adm-exits > *, .adm-photos button {
+    transition: background-color .2s var(--ease), color .2s var(--ease), border-color .2s var(--ease), box-shadow .2s var(--ease), transform .15s var(--ease);
+  }
+  .adm-waiting button:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+  :is(.adm-nav button, .adm-seg button, .adm-waiting button, .adm-photos button):active { transform: scale(.96); }
+  .adm-row:active { transform: scale(.99); }
+
+  /* вход в модерацию */
+  .adm-login > * { animation: adm-in .45s var(--ease) backwards; }
+  .adm-login > :nth-child(2) { animation-delay: .08s; }
+  .adm-login > :nth-child(3) { animation-delay: .16s; }
+
+  /* меню */
+  .adm-nav b { animation: adm-pop .35s var(--ease); }
+  .adm-nav button[data-current] .i { animation: adm-nudge .4s var(--ease); }
+
+  /* раздел открывается по очереди: плитки, графики, строки */
+  .adm-content.enter :is(.adm-waiting button, .adm-tiles div, .adm-charts figure, .adm-list > li, .adm-table tbody tr, .adm-card) { animation: adm-in .4s var(--ease) backwards; }
+  .adm-content.enter :is(.adm-waiting button, .adm-tiles div, .adm-charts figure, .adm-list > li, .adm-table tbody tr, .adm-card):nth-child(2) { animation-delay: .05s; }
+  .adm-content.enter :is(.adm-waiting button, .adm-tiles div, .adm-charts figure, .adm-list > li, .adm-table tbody tr, .adm-card):nth-child(3) { animation-delay: .1s; }
+  .adm-content.enter :is(.adm-waiting button, .adm-tiles div, .adm-charts figure, .adm-list > li, .adm-table tbody tr, .adm-card):nth-child(4) { animation-delay: .15s; }
+  .adm-content.enter :is(.adm-waiting button, .adm-tiles div, .adm-charts figure, .adm-list > li, .adm-table tbody tr, .adm-card):nth-child(5) { animation-delay: .2s; }
+  .adm-content.enter :is(.adm-waiting button, .adm-tiles div, .adm-charts figure, .adm-list > li, .adm-table tbody tr, .adm-card):nth-child(6) { animation-delay: .25s; }
+  .adm-content.enter :is(.adm-waiting button, .adm-tiles div, .adm-charts figure, .adm-list > li, .adm-table tbody tr, .adm-card):nth-child(n+7) { animation-delay: .3s; }
+  .adm-content.enter > :is(.adm-empty, p) { animation: adm-fade .3s .12s backwards; }
+  /* другой вид ещё грузится */
+  .adm-content.waiting { animation: adm-dim .2s .12s forwards; }
+
+  /* столбики растут от нуля, слева направо */
+  .adm-content.enter .adm-plot .bar { transform-box: fill-box; transform-origin: 50% 100%; animation: adm-grow .55s .1s var(--ease) backwards; }
+  .adm-content.enter .adm-plot g:nth-of-type(n+7) .bar { animation-delay: .18s; }
+  .adm-content.enter .adm-plot g:nth-of-type(n+13) .bar { animation-delay: .26s; }
+  .adm-content.enter .adm-plot g:nth-of-type(n+19) .bar { animation-delay: .34s; }
+  .adm-content.enter .adm-plot g:nth-of-type(n+25) .bar { animation-delay: .42s; }
+  .adm-plot .bar { transition: fill .15s var(--ease); }
+  .adm-numbers[open] table { animation: adm-in .25s var(--ease); }
+
+  .adm-bulk { animation: adm-drop .25s var(--ease); }
+  .adm .btn[data-sure] { animation: adm-nudge .3s var(--ease); }
+  .adm-block [data-shown]:not(:empty) { animation: adm-in .35s var(--ease); }
+
+  /* карточка: на телефоне выезжает снизу, на компьютере сбоку */
+  .adm-panel { animation: adm-up .32s var(--ease); }
+  .adm-panel.closing { pointer-events: none; animation: adm-down .22s ease-in forwards; }
+  .adm-panel-body > * { animation: adm-in .35s .06s var(--ease) backwards; }
+  .adm-panel-body > :nth-child(2) { animation-delay: .1s; }
+  .adm-panel-body > :nth-child(3) { animation-delay: .14s; }
+  .adm-panel-body > :nth-child(4) { animation-delay: .18s; }
+  .adm-panel-body > :nth-child(n+5) { animation-delay: .22s; }
+}
+@media (min-width: 900px) and (prefers-reduced-motion: no-preference) {
+  .adm-panel { animation-name: adm-from-side; }
+  .adm-panel.closing { animation-name: adm-to-side; }
+}
+@media (min-width: 1280px) and (prefers-reduced-motion: no-preference) {
+  /* здесь карточка стоит в своём столбце, поэтому проезжает немного */
+  .adm { overflow-x: clip; }
+  .adm-panel { animation-name: adm-near-in; }
+  .adm-panel.closing { animation-name: adm-near-out; }
+}
+@keyframes adm-in { from { opacity: 0; transform: translateY(14px); } }
+@keyframes adm-fade { from { opacity: 0; } }
+@keyframes adm-dim { to { opacity: .5; } }
+@keyframes adm-pop { from { opacity: 0; transform: scale(.3); } }
+@keyframes adm-nudge { 45% { transform: scale(1.18); } }
+@keyframes adm-grow { from { transform: scaleY(0); } }
+@keyframes adm-drop { from { opacity: 0; transform: translateY(-10px); } }
+@keyframes adm-up { from { transform: translateY(100%); } }
+@keyframes adm-down { to { transform: translateY(100%); } }
+@keyframes adm-from-side { from { transform: translateX(100%); } }
+@keyframes adm-to-side { to { transform: translateX(100%); } }
+@keyframes adm-near-in { from { opacity: 0; transform: translateX(40px); } }
+@keyframes adm-near-out { to { opacity: 0; transform: translateX(40px); } }

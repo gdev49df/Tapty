@@ -1,6 +1,7 @@
 // Обзор: что ждёт решения, цифры за сегодня и неделю, графики за 30 дней.
 import { $, $$, esc } from '../ui.js';
 import { isoDay, send } from './common.js';
+import { countUp } from './motion.js';
 
 const TILES = [['users', 'Новые пользователи'], ['listings', 'Объявления'], ['messages', 'Сообщения'], ['shops', 'Заявки на магазины']];
 const CHARTS = [['users', 'Новые пользователи'], ['listings', 'Новые объявления'], ['messages', 'Сообщения в чатах']];
@@ -107,6 +108,7 @@ export default async function overview(ctx) {
       <p class="muted small">Удалённые аккаунты, объявления и переписки в цифры не входят. Сутки считаются по времени Астаны.</p>
     </section>`;
   $$('[data-go]', ctx.box).forEach((b) => (b.onclick = () => ctx.open(b.dataset.go)));
+  countUp($$('.adm-waiting b, .adm-tiles dd:not(.sub)', ctx.box));
   const draw = CHARTS.map(([key]) => chart($(`[data-chart="${key}"]`, ctx.box), days, key));
   let width = 0;
   const watcher = new ResizeObserver(() => {

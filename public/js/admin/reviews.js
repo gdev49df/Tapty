@@ -8,7 +8,7 @@ export default async function reviews(ctx) {
   ctx.box.innerHTML = items.length
     ? `<ul class="adm-list">${items
         .map(
-          (r) => `<li class="adm-review">
+          (r) => `<li class="adm-review" data-key="review-${r.id}">
             <div><p><strong>${esc(r.author)}</strong> о продавце <strong>${esc(r.seller)}</strong></p>${stars(r.rating)}
               ${r.text ? `<p class="desc">${esc(r.text)}</p>` : ''}</div>
             <button type="button" class="btn small ghost warn" data-remove="${r.id}">Удалить</button>
