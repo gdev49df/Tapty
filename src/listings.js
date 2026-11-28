@@ -7,6 +7,7 @@ import { SESSION_DAYS, requireUser } from './auth.js';
 import { rating, sellerReviews } from './reviews.js';
 import { needles, sameProduct, signature } from './same.js';
 import { isBanned } from './bans.js';
+import { matcher, stopWords } from './site.js';
 
 const PAGE = 20;
 const HIDE_AFTER_REPORTS = 5;
@@ -35,8 +36,11 @@ const card = (row) => ({
   photo: parsePhotos(row)[0] || null,
 });
 
-export const publicStatus = (row) =>
-  row.status === 'active' && row.expires_at <= now() ? 'expired' : row.status;
+// review — ждёт проверки из-за стоп-слов: в базе это скрытое объявление с отметкой held.
+export const publicStatus = (row) => {
+  if (row.status === 'hidden' && row.held) return 'review';
+  return row.status === 'active' && row.expires_at <= now() ? 'expired' : row.status;
+};
 
 const detail = (row) => ({
   ...card(row),
@@ -353,12 +357,15 @@ async function checkPhotos(env, ids, owner, listingId) {
 async function checkSeller(env, owner, phone, exceptId) {
   if (await isBanned(env, owner, phone)) fail(403, 'banned');
   const { total } = await env.DB.prepare(
-    "SELECT COUNT(*) AS total FROM listings WHERE phone = ? AND status = 'active' AND expires_at > ? AND id != ?"
+    "SELECT COUNT(*) AS total FROM listings WHERE phone = ? AND ((status = 'active' AND expires_at > ?) OR held != '') AND id != ?"
   )
     .bind(phone, now(), exceptId)
     .first();
   if (total >= 20) fail(429, 'too_many_active');
 }
+
+// Есть ли в названии или описании слова, из-за которых объявление сначала смотрит модератор.
+const suspicious = async (env, data) => matcher(await stopWords(env))(data).length > 0;
 
 const attach = (env, ids, listingId) =>
   env.DB.prepare(`UPDATE photos SET listing_id = ? WHERE id IN (${ids.map(() => '?').join(',')})`)
@@ -374,7 +381,12 @@ export async function createListing(request, env, ctx, who) {
   await limit(env, `new:${who.ip}`, 40, DAY);
 
   const t = now();
-  const row = { ...data, photos: JSON.stringify(data.photos), owner: who.owner, created_at: t, bumped_at: t, expires_at: t + LIMITS.days * DAY };
+  // чистое объявление публикуется сразу
+  const review = await suspicious(env, data);
+  const row = {
+    ...data, photos: JSON.stringify(data.photos), owner: who.owner, created_at: t, bumped_at: t, expires_at: t + LIMITS.days * DAY,
+    ...(review && { status: 'hidden', hidden_from: 'active', held: 'new' }),
+  };
   const keys = Object.keys(row);
   const { id } = await env.DB.prepare(
     `INSERT INTO listings (${keys.join(',')}) VALUES (${keys.map(() => '?').join(',')}) RETURNING id`
@@ -383,7 +395,7 @@ export async function createListing(request, env, ctx, who) {
     .first();
   if (data.photos.length) await attach(env, data.photos, id);
   ctx.waitUntil(cleanup(env));
-  return json({ id }, 201);
+  return json({ id, review }, 201);
 }
 
 // Если цену снизили, прежняя показывается зачёркнутой. Подняли — зачёркнутая пропадает.
@@ -396,20 +408,35 @@ function previousPrice(old, data) {
 export async function updateListing(request, env, id, who) {
   await requireUser(env, who);
   const old = await findOwn(env, id, who.owner);
-  if (old.status === 'hidden') fail(403, 'hidden');
+  // ждущее проверки автор может исправить, скрытое модератором — нет
+  if (old.status === 'hidden' && !old.held) fail(403, 'hidden');
   const data = validate(await readJson(request));
   await checkSeller(env, who.owner, data.phone, id);
   await checkPhotos(env, data.photos, who.owner, id);
   await limit(env, `edit:${who.owner}`, 60, 3600);
 
-  const row = { ...data, photos: JSON.stringify(data.photos), approved: 0, old_price: previousPrice(old, data) };
+  const photos = JSON.stringify(data.photos);
+  const rewritten = data.search !== old.search;
+  const row = {
+    ...data, photos, old_price: previousPrice(old, data),
+    // одобрение модератора держится, пока не менялись текст и фото
+    approved: old.approved && !rewritten && photos === old.photos ? 1 : 0,
+  };
+  // текст проверяется заново, только если он изменился или объявление ещё ждёт проверки
+  const review = Boolean(rewritten || old.held) && (await suspicious(env, data));
+  if (review && !old.held) Object.assign(row, { status: 'hidden', hidden_from: old.status, held: 'edit' });
+  if (!review && old.held) {
+    Object.assign(row, { status: old.hidden_from || 'active', hidden_from: '', held: '' });
+    // ни разу не показанное начинает свой срок с этой минуты
+    if (old.held === 'new') Object.assign(row, { bumped_at: now(), expires_at: now() + LIMITS.days * DAY });
+  }
   const keys = Object.keys(row);
   await env.DB.prepare(`UPDATE listings SET ${keys.map((k) => `${k} = ?`).join(',')} WHERE id = ?`)
     .bind(...keys.map((k) => row[k]), id)
     .run();
   if (data.photos.length) await attach(env, data.photos, id);
   await deletePhotos(env, parsePhotos(old).filter((p) => !data.photos.includes(p)));
-  return json({ id });
+  return json({ id, review });
 }
 
 export async function setStatus(request, env, id, who) {
@@ -448,8 +475,9 @@ export async function removeRow(env, row) {
 
 export async function deleteListing(env, id, who) {
   const row = await findOwn(env, id, who.owner);
-  // Скрытое модератором объявление нельзя стереть вместе с жалобами.
-  if (row.status === 'hidden') fail(403, 'hidden');
+  // Скрытое модератором объявление нельзя стереть вместе с жалобами. Ждущее проверки — можно,
+  // если автор не заблокирован.
+  if (row.status === 'hidden' && (!row.held || (await isBanned(env, who.owner, row.phone)))) fail(403, 'hidden');
   await removeRow(env, row);
   return json({ ok: true });
 }
@@ -464,7 +492,8 @@ export async function reportListing(request, env, id, { ip }) {
     .run();
   const { total } = await env.DB.prepare('SELECT COUNT(*) AS total FROM reports WHERE listing_id = ?').bind(id).first();
   if (total >= HIDE_AFTER_REPORTS && !row.approved) {
-    await env.DB.prepare("UPDATE listings SET status = 'hidden' WHERE id = ?").bind(id).run();
+    // прежнее состояние запоминается: проданное после проверки вернётся проданным
+    await env.DB.prepare("UPDATE listings SET hidden_from = status, status = 'hidden' WHERE id = ? AND status != 'hidden'").bind(id).run();
   }
   return json({ ok: true });
 }

@@ -77,7 +77,7 @@ export const cityRu = (id) => CITIES.find((c) => c.id === id)?.ru || '';
 export const categoryRu = (id) => CATEGORIES.find((c) => c.id === id)?.ru || '';
 
 export const badge = (text, tone = '') => `<span class="adm-badge ${tone}">${esc(text)}</span>`;
-const STATUS = { active: ['Активно', 'ok'], sold: ['Продано', ''], expired: ['Срок вышел', ''], hidden: ['Скрыто', 'bad'] };
+const STATUS = { active: ['Активно', 'ok'], sold: ['Продано', ''], expired: ['Срок вышел', ''], hidden: ['Скрыто', 'bad'], review: ['На проверке', 'warn'] };
 export const statusBadge = (status) => badge(...(STATUS[status] || [status]));
 
 export const thumb = (photo, fallback = 'camera') =>

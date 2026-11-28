@@ -1250,7 +1250,130 @@ try {
     assert.equal(after.days.at(-1).date, new Date(Date.now() + 5 * 3600e3).toISOString().slice(0, 10));
     assert.ok(after.week.users >= after.today.users);
     const counts = (await admin('counts')).data;
-    assert.deepEqual(Object.keys(counts).sort(), ['listings', 'queue', 'shops', 'users']);
+    assert.deepEqual(Object.keys(counts).sort(), ['hidden', 'listings', 'queue', 'shops', 'users']);
+  });
+
+  await test('скрытое возвращается таким, каким было', async () => {
+    const ip = '203.0.113.96';
+    const req = as(ip);
+    const seller = await signUp('Продавший', { ip, login: 'hidden_back' });
+    const make = (title) => create(seller, { title, phone: '77090100020' }, '203.0.113.210');
+    const sold = await make('Самокат детский');
+    const reported = await make('Санки деревянные');
+    const live = await make('Лыжи беговые');
+    for (const item of [sold, reported]) await req(`/api/listings/${item}/status`, seller, { action: 'sold' });
+    const state = async (item) => (await admin(`listings/${item}`)).data.item;
+    const owner = await ownerOf(sold);
+    const total = (await admin('counts')).data.hidden;
+    await moderate(sold, 'hide', 'Неверная категория');
+    await moderate(live, 'hide', 'Неверная категория');
+    // повторное скрытие меняет причину, но не забывает, что было раньше
+    await moderate(sold, 'hide', 'Повторное объявление');
+    for (let i = 0; i < 5; i++) {
+      await call(`/api/listings/${reported}/report`, { token: key(), method: 'POST', body: { reason: 'wrong' }, headers: { 'cf-connecting-ip': `198.51.103.${i + 1}` } });
+    }
+    assert.equal((await admin('counts')).data.hidden, total + 3);
+    const rows = (await admin('listings?view=hidden')).data.items;
+    assert.deepEqual([sold, reported, live].map((item) => rows.find((r) => r.id === item)).map((r) => [r.before, r.banned]), [['sold', false], ['sold', false], ['active', false]]);
+    assert.equal((await admin('users')).data.items.find((u) => u.id === owner).hidden, 3);
+    assert.equal((await admin(`users/${owner}`)).data.items.find((i) => i.id === sold).before, 'sold');
+    await admin('listings', { ids: [sold, reported, live], action: 'show' });
+    for (const [item, status] of [[sold, 'sold'], [reported, 'sold'], [live, 'active']]) assert.equal((await state(item)).status, status);
+    // «Одобрить» уже показываемое ничего не меняет
+    await moderate(sold, 'show');
+    assert.equal((await state(sold)).status, 'sold');
+    // скрытое во время блокировки тоже помнит, что было до неё
+    await banSeller(sold);
+    assert.equal((await admin('listings?view=hidden')).data.items.find((r) => r.id === sold).banned, true);
+    await moderate(sold, 'hide', 'Запрещённый товар');
+    await admin(`users/${owner}`, { action: 'unban' });
+    assert.equal((await state(live)).status, 'active');
+    assert.deepEqual([(await state(sold)).status, (await state(sold)).before], ['hidden', 'sold']);
+    await moderate(sold, 'show');
+    assert.equal((await state(sold)).status, 'sold');
+  });
+
+  await test('чистое объявление публикуется сразу, со стоп-словом ждёт проверки', async () => {
+    const ip = '203.0.113.97';
+    const req = as(ip);
+    const seller = await signUp('Проверяемый', { ip, login: 'review_one' });
+    const body = (over) => listing({ phone: '77090100030', ...over });
+    const post = (over) => call('/api/listings', { token: seller, method: 'POST', body: body(over), headers: { 'cf-connecting-ip': '203.0.113.211' } });
+    await admin('settings', { stopwords: 'предоплат\nоружие' }, 'PUT');
+    const clean = (await post({ title: 'Ковер шерстяной' })).data;
+    assert.equal(clean.review, false);
+    assert.equal((await call(`/api/listings/${clean.id}`)).status, 200);
+    const held = (await post({ title: 'Ковер по предоплате' })).data;
+    assert.equal(held.review, true);
+    const id = held.id;
+    assert.equal((await call(`/api/listings/${id}`)).status, 404);
+    assert.equal((await req(`/api/listings/${id}`, seller)).data.item.status, 'review');
+    assert.equal((await req('/api/mine', seller)).data.items.find((i) => i.id === id).status, 'review');
+    assert.equal((await req(`/api/listings/${id}/status`, seller, { action: 'sold' })).status, 403);
+    const waiting = (await admin('listings?view=flagged')).data.items.find((i) => i.id === id);
+    assert.deepEqual([waiting.status, waiting.flags], ['review', ['предоплат']]);
+    assert.ok(!(await admin('listings?view=hidden')).data.items.some((i) => i.id === id));
+    assert.ok(!(await queued('listing')).some((i) => i.id === id));
+    // исправил текст — опубликовано; снова вписал слово — снова на проверке
+    const put = (target, over) => req(`/api/listings/${target}`, seller, body(over), 'PUT');
+    assert.equal((await put(id, { title: 'Ковер по предоплате', price: 5000 })).data.review, true);
+    assert.equal((await put(id, { title: 'Ковер без условий' })).data.review, false);
+    assert.equal((await call(`/api/listings/${id}`)).status, 200);
+    assert.equal((await put(clean.id, { title: 'Ковер и оружие' })).data.review, true);
+    assert.equal((await call(`/api/listings/${clean.id}`)).status, 404);
+    // одобренное модератором не уходит на проверку, пока не менялся текст
+    assert.deepEqual((await moderate(clean.id, 'show')).data, { done: 1, skipped: 0 });
+    assert.equal((await put(clean.id, { title: 'Ковер и оружие', price: 100 })).data.review, false);
+    assert.equal((await call(`/api/listings/${clean.id}`)).status, 200);
+    // проданное после проверки остаётся проданным
+    await req(`/api/listings/${id}/status`, seller, { action: 'sold' });
+    assert.equal((await put(id, { title: 'Ковер, предоплата' })).data.review, true);
+    await moderate(id, 'show');
+    assert.equal((await admin(`listings/${id}`)).data.item.status, 'sold');
+    // скрытое модератором из проверки уже не изменить и не удалить
+    const other = (await post({ title: 'Нож и оружие' })).data.id;
+    await moderate(other, 'hide', 'Запрещённый товар');
+    assert.equal((await put(other, { title: 'Нож кухонный' })).status, 403);
+    assert.equal((await req(`/api/listings/${other}`, seller, undefined, 'DELETE')).status, 403);
+    await moderate(other, 'delete');
+    // ждущее проверки автор удаляет сам, а заблокированный — нет
+    const mine = (await post({ title: 'Оружие игрушечное' })).data.id;
+    assert.equal((await req(`/api/listings/${mine}`, seller, undefined, 'DELETE')).status, 200);
+    const last = (await post({ title: 'Оружие водяное' })).data.id;
+    await banSeller(last);
+    assert.equal((await req(`/api/listings/${last}`, seller, undefined, 'DELETE')).status, 403);
+    const owner = await ownerOf(last);
+    await admin(`users/${owner}`, { action: 'unban' });
+    assert.equal((await admin(`listings/${last}`)).data.item.status, 'review');
+    await admin('settings', { stopwords: '' }, 'PUT');
+  });
+
+  await test('управление аккаунтом: имя, резервный код и удаление', async () => {
+    const ip = '203.0.113.98';
+    const req = as(ip);
+    const seller = await signUp('Старое Имя', { ip, login: 'managed_one' });
+    const item = await create(seller, { title: 'Глобус настольный', name: 'Старое Имя', phone: '77090100040' }, '203.0.113.212');
+    const owner = await ownerOf(item);
+    const manage = (body) => admin(`users/${owner}`, body);
+    assert.equal((await call(`/api/admin/users/${owner}`, { method: 'POST', body: { action: 'code' }, headers: { 'x-admin-key': 'x' } })).status, 403);
+    assert.equal((await manage({ action: 'rename', name: ' ' })).data.field, 'name');
+    assert.equal((await manage({ action: 'rename', name: 'Новое  Имя' })).status, 200);
+    assert.equal((await admin(`users/${owner}`)).data.user.name, 'Новое Имя');
+    assert.equal((await admin(`listings/${item}`)).data.item.name, 'Новое Имя');
+    // новый код действует: им задают новый пароль, прежний вход заканчивается
+    const { code } = (await manage({ action: 'code' })).data;
+    assert.match(code, /^[0-9A-Z]{4}(-[0-9A-Z]{4}){3}$/);
+    const recovered = await req('/api/auth/recover', key(), { login: 'managed_one', key: 'a'.repeat(64), code });
+    assert.equal(recovered.status, 200, JSON.stringify(recovered.data));
+    assert.equal((await req('/api/mine', seller)).data.items?.length || 0, 0);
+    // удаление: только с логином; скрытое объявление ему не мешает
+    await moderate(item, 'hide', 'Неверная категория');
+    assert.equal((await manage({ action: 'delete', login: 'managed' })).data.field, 'login');
+    assert.equal((await manage({ action: 'delete', login: 'Managed_One ' })).status, 200);
+    assert.equal((await admin(`listings/${item}`)).status, 404);
+    assert.equal((await admin(`users/${owner}`)).status, 404);
+    assert.equal((await req('/api/auth/login', key(), { login: 'managed_one', key: 'a'.repeat(64) })).status, 401);
+    assert.equal((await manage({ action: 'rename', name: 'Кто-то' })).status, 404);
   });
 
   await test('настройки сайта и технические работы', async () => {

@@ -58,6 +58,16 @@ mark { padding: 0 2px; border-radius: 3px; }
 .adm-row-text { display: flex; flex-direction: column; flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .adm-row-text strong { font-weight: 600; }
 .adm-row-text small { color: var(--muted); font-size: 12px; }
+.adm-table.people tbody tr { cursor: pointer; }
+.adm-block { display: flex; flex-direction: column; gap: 12px; padding-top: 16px; border-top: 1px solid var(--line); }
+.adm-block h3 { font-size: 14px !important; }
+.adm-block .backup-code { font-size: 16px; }
+.adm-block [data-shown]:not(:empty) { display: flex; flex-direction: column; gap: 12px; padding: 12px; background: var(--surface); border-radius: var(--r); }
+.adm-inline { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
+.adm-inline .field { flex: 1; min-width: 180px; }
+.adm-marks { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; }
+.adm-acts { margin-top: 8px; }
+.adm-list .adm-acts { margin: 0; padding: 0 8px 12px 76px; }
 .adm-review { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 16px 0; }
 .adm-review > div { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
 .adm-more { margin-top: 16px; }
@@ -86,6 +96,7 @@ mark { padding: 0 2px; border-radius: 3px; }
   .adm-table td::before { content: attr(data-label); display: block; color: var(--muted); font-size: 11px; }
   .adm-table td.main, .adm-table td.state { grid-column: 1 / -1; }
   .adm-table td.state:empty { display: none; }
+  .adm-table td.act { grid-column: 1 / -1; }
   /* строка с отметкой: сама отметка слева, остальное справа от неё */
   .adm-table tr:has(.pick) { grid-template-columns: 40px minmax(0, 1fr) minmax(0, 1fr); }
   .adm-table tr:has(.pick) .pick { grid-column: 1; grid-row: 1 / span 3; }
@@ -97,11 +108,15 @@ mark { padding: 0 2px; border-radius: 3px; }
   .adm-table .pick { width: 48px; padding-inline: 4px; }
   .adm-table .main { width: 36%; }
   .adm-table .state small { margin-top: 4px; }
+  .adm-table td.act { text-align: right; }
+  .adm-table td.act .adm-buttons { justify-content: flex-end; }
   .adm-table tbody tr:hover { background: var(--surface); }
 }
 /* с открытой карточкой в узком окне список помещается без правых столбцов */
 @media (min-width: 1280px) and (max-width: 1599px) {
-  .with-panel .adm-table :is(th:nth-last-child(2), td:nth-last-child(2), th:nth-last-child(3), td:nth-last-child(3)):not(.main):not(.pick) { display: none; }
+  .with-panel .adm-table:not(.people) :is(th:nth-last-child(2), td:nth-last-child(2), th:nth-last-child(3), td:nth-last-child(3)):not(.main):not(.pick) { display: none; }
+  /* в списке людей прячутся даты и кнопка: карточка уже открыта */
+  .with-panel .adm-table.people tr > :is(:nth-child(2), :nth-child(4), :last-child) { display: none; }
 }
 
 /* ---------- обзор ---------- */
@@ -138,6 +153,10 @@ mark { padding: 0 2px; border-radius: 3px; }
 
 /* ---------- настройки ---------- */
 .adm-settings { display: grid; gap: 16px; align-items: start; }
+/* на телефоне колонок нет, а карточки идут по важности */
+.adm-col { display: contents; }
+.adm-col:first-child > :nth-child(2) { order: 1; }
+.adm-col:last-child > :nth-child(2) { order: 2; }
 .adm-card { display: flex; flex-direction: column; gap: 16px; min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: var(--r-l); }
 .adm-card.alert { border: 2px solid var(--danger); }
 .adm-card .backup-code { font-size: 16px; }
@@ -193,6 +212,9 @@ blockquote { padding: 12px; background: var(--surface); border-radius: var(--r);
   .adm-panel { left: auto; width: 440px; border-left: 1px solid var(--line); box-shadow: -12px 0 32px rgba(0, 0, 0, .12); }
   html.adm-locked { overflow: auto; }
   .adm-settings { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* у каждой колонки своя высота, поэтому под короткой карточкой не остаётся пустоты */
+  .adm-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .adm-col > * { order: 0 !important; }
 }
 @media (min-width: 1280px) {
   .adm.with-panel { grid-template-columns: 240px minmax(0, 1fr) 440px; }

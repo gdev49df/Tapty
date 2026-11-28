@@ -27,7 +27,7 @@ export default async function settings(ctx) {
 
 function draw(ctx, { site, stopwords }) {
   const on = site.maintenance;
-  ctx.box.innerHTML = `<div class="adm-settings">
+  ctx.box.innerHTML = `<div class="adm-settings"><div class="adm-col">
     <form class="adm-card${on ? ' alert' : ''}" data-form="down">
       <h2>Тех. работы</h2>
       <p>${on ? '<strong>Включены.</strong> Посетители видят экран с большим логотипом, сайт не работает. Модерация открыта.' : 'Выключены. Когда включите, посетители увидят экран «Тех. работы» с большим логотипом вместо сайта.'}</p>
@@ -38,6 +38,15 @@ function draw(ctx, { site, stopwords }) {
         <button class="btn small ghost">Сохранить сообщение</button>
       </div>
     </form>
+    <form class="adm-card" data-form="words">
+      <h2>Стоп-слова</h2>
+      <label class="field"><span>По одному в строке</span>
+        <textarea class="input" name="stopwords" rows="10" spellcheck="false">${esc(stopwords.join('\n'))}</textarea>
+        <small>Новое или изменённое объявление с таким словом не публикуется, пока вы не одобрите его в «Объявления» → «Под вопросом». Остальные публикуются сразу. Достаточно начала слова: «наркот» найдёт и «наркотики».</small>
+      </label>
+      <div class="adm-buttons"><button class="btn small">Сохранить список</button></div>
+    </form>
+    </div><div class="adm-col">
     <form class="adm-card" data-form="social">
       <h2>Соцсети и плашка сверху</h2>
       ${field('telegram', 'Telegram', site.telegram, { max: 120, placeholder: '@tapty или ссылка t.me' })}
@@ -46,21 +55,13 @@ function draw(ctx, { site, stopwords }) {
       ${field('promoKk', 'Текст плашки на казахском', site.promoKk, { max: 140, placeholder: 'Бізді әлеуметтік желілерден бақылаңыз:' })}
       <div class="adm-buttons"><button class="btn small">Сохранить</button></div>
     </form>
-    <form class="adm-card" data-form="words">
-      <h2>Стоп-слова</h2>
-      <label class="field"><span>По одному в строке</span>
-        <textarea class="input" name="stopwords" rows="10" spellcheck="false">${esc(stopwords.join('\n'))}</textarea>
-        <small>Объявление с таким словом появится в «Под вопросом». Достаточно начала слова: «наркот» найдёт и «наркотики».</small>
-      </label>
-      <div class="adm-buttons"><button class="btn small">Сохранить список</button></div>
-    </form>
     ${
       access.pass
         ? '<div class="adm-card"><h2>Вход по коду</h2><p>Включён: кроме ключа нужен код из приложения.</p></div>'
         : `<div class="adm-card" data-totp><h2>Вход по коду</h2><p><strong>Выключен.</strong> Включите, чтобы одного ключа было мало.</p>
              <div class="adm-buttons"><button type="button" class="btn small" data-setup>Создать секрет</button></div></div>`
     }
-  </div>`;
+  </div></div>`;
 
   const put = async (button, body, done) => {
     button.disabled = true;

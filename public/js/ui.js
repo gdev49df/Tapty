@@ -210,6 +210,8 @@ export const hiddenWhy = (reason) => `
     <p class="small">${esc(t('hideAppeal'))} <a href="mailto:work@gdev.uk">work@gdev.uk</a></p>
   </div>`;
 
+export const reviewNote = () => `<div class="why"><p>${esc(t('reviewHint'))}</p></div>`;
+
 export function emptyState(title, hint, action = '') {
   return `<div class="empty"><div class="empty-mark" aria-hidden="true"></div><h2>${esc(title)}</h2><p>${esc(hint)}</p>${action}</div>`;
 }

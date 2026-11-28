@@ -3,9 +3,10 @@
 import { DAY, fail, json, now, readJson } from './util.js';
 import { findRow, own, parsePhotos, publicStatus, removeRow } from './listings.js';
 import { complaints } from './chat.js';
+import { LIMITS } from '../public/js/catalog.js';
 import { BAN_DAYS, ban, isBanned, unban } from './bans.js';
-import { stopWords } from './site.js';
-import { SESSION_DAYS } from './auth.js';
+import { matcher, stopWords } from './site.js';
+import { SESSION_DAYS, manageAccount } from './auth.js';
 
 const PAGE = 30;
 // Весь Казахстан живёт по UTC+5: сутки в статистике считаются по этому времени.
@@ -16,34 +17,29 @@ const WEIGHT = { fraud: 5, banned: 5, insult: 3, other: 2, spam: 1, wrong: 1, so
 
 // В очереди: объявления с жалобами и скрытые сайтом после жалоб, по которым ещё нет решения.
 const QUEUED = `(l.id IN (SELECT listing_id FROM reports)
-  OR (l.status = 'hidden' AND l.hide_reason = '' AND NOT EXISTS (SELECT 1 FROM bans WHERE value = l.owner)))`;
+  OR (l.status = 'hidden' AND l.hide_reason = '' AND l.held = '' AND NOT EXISTS (SELECT 1 FROM bans WHERE value = l.owner)))`;
 
 const BANNED_ACCOUNTS = `SELECT value FROM bans WHERE value LIKE '%:%'
   UNION SELECT value FROM bans b WHERE value NOT LIKE '%:%' AND NOT EXISTS (SELECT 1 FROM bans a WHERE a.value = b.owner)`;
 
 // ---------- стоп-слова ----------
 
-// Слово ищется с начала: «ставки» не найдётся в «поставки».
-const starts = (word) => new RegExp(`(?<![\\p{L}\\p{N}])${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'u');
-const matcher = (words) => {
-  const rules = words.map((w) => [w, starts(w)]);
-  return (row) => rules.filter(([, re]) => re.test(row.search)).map(([w]) => w);
-};
-
-// Активные объявления со стоп-словами, которые модератор ещё не проверил.
+// Что ждёт взгляда модератора: объявления на проверке и показываемые, в тексте которых есть
+// стоп-слова, а модератор их ещё не одобрил (поданы раньше, чем слово попало в список).
 async function flagged(env, words) {
-  if (!words.length) return [];
+  const live = words.length
+    ? `OR (l.status = 'active' AND l.approved = 0 AND l.expires_at > ? AND (${words.map(() => 'instr(l.search, ?) > 0').join(' OR ')}))`
+    : '';
   const { results } = await env.DB.prepare(
-    `SELECT l.*, u.name AS person, u.login, (SELECT COUNT(*) FROM reports r WHERE r.listing_id = l.id) AS reports
+    `SELECT l.*, u.name AS person, u.login, ${BANNED}, (SELECT COUNT(*) FROM reports r WHERE r.listing_id = l.id) AS reports
      FROM listings l LEFT JOIN users u ON u.id = l.owner
-     WHERE l.status = 'active' AND l.approved = 0 AND l.expires_at > ?
-       AND (${words.map(() => 'instr(l.search, ?) > 0').join(' OR ')})
-     ORDER BY l.created_at DESC, l.id DESC LIMIT 200`
+     WHERE l.held != '' ${live}
+     ORDER BY l.held != '' DESC, l.created_at DESC, l.id DESC LIMIT 200`
   )
-    .bind(now(), ...words)
+    .bind(...(words.length ? [now(), ...words] : []))
     .all();
   const find = matcher(words);
-  return results.filter((r) => find(r).length);
+  return results.filter((r) => r.held || find(r).length);
 }
 
 // ---------- обзор ----------
@@ -55,11 +51,14 @@ export async function counts(env) {
       `SELECT (SELECT COUNT(*) FROM listings l WHERE ${QUEUED}) AS listings,
          (SELECT COUNT(*) FROM complaints k JOIN chats c ON c.id = k.chat_id) AS chats,
          (SELECT COUNT(*) FROM shops WHERE status = 'pending') AS shops,
+         (SELECT COUNT(*) FROM listings WHERE status = 'hidden' AND held = '') AS hidden,
          (SELECT COUNT(*) FROM (${BANNED_ACCOUNTS})) AS banned`
     ).first(),
     stopWords(env).then((words) => flagged(env, words)),
   ]);
-  return json({ queue: found.listings + found.chats, listings: suspicious.length, shops: found.shops, users: found.banned });
+  return json({
+    queue: found.listings + found.chats, listings: suspicious.length, hidden: found.hidden, shops: found.shops, users: found.banned,
+  });
 }
 
 export async function stats(env) {
@@ -112,7 +111,7 @@ export async function queue(env) {
       const score = weigh(list) + (r.status === 'hidden' ? 5 : 0);
       return {
         type: 'listing', id: r.id, title: r.title, price: r.price, priceType: r.price_type, photo: parsePhotos(r)[0] || null,
-        hidden: r.status === 'hidden', reasons: tally(list), score, level: urgency(score), at: r.first || r.bumped_at,
+        hidden: r.status === 'hidden' && !r.held, review: Boolean(r.held), reasons: tally(list), score, level: urgency(score), at: r.first || r.bumped_at,
       };
     }),
     ...chats.map(({ target, ...c }) => {
@@ -127,6 +126,11 @@ export async function queue(env) {
 
 // ---------- объявления ----------
 
+// Закрыт ли аккаунт или номер: такое объявление возвращается только вместе с разблокировкой.
+const BANNED = 'EXISTS (SELECT 1 FROM bans WHERE value IN (l.owner, l.phone)) AS banned';
+// Каким скрытое объявление станет, если его вернуть.
+const before = (r) => r.ban_status || r.hidden_from || 'active';
+
 const row = (r, find) => ({
   id: r.id,
   title: r.title,
@@ -140,6 +144,8 @@ const row = (r, find) => ({
   reports: r.reports,
   hideReason: r.hide_reason,
   flags: find(r),
+  banned: Boolean(r.banned),
+  ...(r.status === 'hidden' && { before: before(r) }),
   owner: r.owner,
   person: r.person || r.name,
   login: r.login || '',
@@ -153,8 +159,8 @@ export async function listingList(env, url) {
   if (view === 'flagged') return json({ items: (await flagged(env, words)).map((r) => row(r, find)), next: null });
   const hidden = view === 'hidden';
   const { results } = await env.DB.prepare(
-    `SELECT l.*, u.name AS person, u.login, (SELECT COUNT(*) FROM reports r WHERE r.listing_id = l.id) AS reports
-     FROM listings l LEFT JOIN users u ON u.id = l.owner ${hidden ? "WHERE l.status = 'hidden'" : ''}
+    `SELECT l.*, u.name AS person, u.login, ${BANNED}, (SELECT COUNT(*) FROM reports r WHERE r.listing_id = l.id) AS reports
+     FROM listings l LEFT JOIN users u ON u.id = l.owner ${hidden ? "WHERE l.status = 'hidden' AND l.held = ''" : ''}
      ORDER BY l.created_at DESC, l.id DESC LIMIT ${PAGE + 1} OFFSET ${offset}`
   ).all();
   return json({ items: results.slice(0, PAGE).map((r) => row(r, find)), next: results.length > PAGE ? offset + PAGE : null });
@@ -168,7 +174,7 @@ export async function listingDetail(env, id) {
     person(env, found.owner),
   ]);
   return json({
-    item: { ...own(found), owner: found.owner },
+    item: { ...own(found), owner: found.owner, ...(found.status === 'hidden' && { before: before(found) }) },
     reasons: tally(results.map((r) => r.reason)),
     flags: matcher(words)(found),
     author,
@@ -192,17 +198,26 @@ export async function listingAction(request, env) {
     if (action === 'delete') await removeRow(env, found);
     else if (action === 'hide') {
       await env.DB.batch([
-        env.DB.prepare("UPDATE listings SET status = 'hidden', approved = 0, hide_reason = ?, ban_status = '' WHERE id = ?").bind(reason, found.id),
+        env.DB.prepare(
+          // справа от знака равенства — значения, какими они были до этого изменения
+          `UPDATE listings SET held = '',
+             hidden_from = CASE WHEN status != 'hidden' THEN status WHEN ban_status != '' THEN ban_status ELSE hidden_from END,
+             status = 'hidden', approved = 0, hide_reason = ?, ban_status = '' WHERE id = ?`
+        ).bind(reason, found.id),
         settled,
       ]);
     } else {
       // объявления заблокированного возвращаются только вместе с разблокировкой
       if (await isBanned(env, found.owner, found.phone)) continue;
+      // ни разу не показанное начинает свой срок с одобрения
+      const first = found.held === 'new';
+      const t = now();
       await env.DB.batch([
         env.DB.prepare(
-          `UPDATE listings SET status = CASE status WHEN 'hidden' THEN 'active' ELSE status END,
-             approved = 1, hide_reason = '', ban_status = '' WHERE id = ?`
-        ).bind(found.id),
+          `UPDATE listings SET status = CASE status WHEN 'hidden' THEN ? ELSE status END,
+             approved = 1, hide_reason = '', ban_status = '', hidden_from = '', held = ''
+             ${first ? ', bumped_at = ?, expires_at = ?' : ''} WHERE id = ?`
+        ).bind(before(found), ...(first ? [t, t + LIMITS.days * DAY] : []), found.id),
         settled,
       ]);
     }
@@ -251,6 +266,7 @@ export async function userList(env, url) {
   const { results } = await env.DB.prepare(
     `SELECT u.id, u.name, u.login, u.created_at AS since, b.until,
        (SELECT COUNT(*) FROM listings l WHERE l.owner = u.id) AS ads,
+       (SELECT COUNT(*) FROM listings l WHERE l.owner = u.id AND l.status = 'hidden' AND l.held = '') AS hidden,
        (SELECT COUNT(*) FROM sessions s WHERE s.user_id = u.id AND s.created_at > ?) AS sessions
      FROM users u LEFT JOIN bans b ON b.value = u.id WHERE u.login IS NOT NULL
      ORDER BY u.created_at DESC, u.id LIMIT ${PAGE + 1} OFFSET ${offset}`
@@ -277,19 +293,21 @@ export async function userDetail(env, key) {
     phones: [...new Set([...results.map((r) => r.phone), ...banned.results.map((r) => r.value)])],
     items: results.map((r) => ({
       id: r.id, title: r.title, price: r.price, priceType: r.price_type, photo: parsePhotos(r)[0] || null,
-      status: publicStatus(r), hideReason: r.hide_reason,
+      status: publicStatus(r), hideReason: r.hide_reason, ...(r.status === 'hidden' && { before: before(r) }),
     })),
   });
 }
 
 export async function userAction(request, env, key) {
-  const { action, days } = await readJson(request);
+  const body = await readJson(request);
+  const { action, days } = body;
   const account = key.includes(':');
   if (action === 'unban') {
     await unban(env, key);
     return json({ ok: true });
   }
   if (!account) fail(400, 'invalid', 'action');
+  if (['rename', 'code', 'delete'].includes(action)) return manageAccount(env, key, body);
   const exists = await env.DB.prepare('SELECT 1 FROM users WHERE id = ?1 UNION SELECT 1 FROM listings WHERE owner = ?1').bind(key).first();
   if (!exists) fail(404, 'not_found');
   if (action === 'ban') {

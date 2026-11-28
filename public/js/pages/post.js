@@ -361,10 +361,10 @@ export default async function post({ root, params, alive, go, back, rerender, on
     button.disabled = true;
     button.textContent = t('publishing');
     try {
-      const { id } = await api(editId ? `/listings/${editId}` : '/listings', { method: editId ? 'PUT' : 'POST', body: data });
+      const { id, review } = await api(editId ? `/listings/${editId}` : '/listings', { method: editId ? 'PUT' : 'POST', body: data });
       store.set('seller', { name: data.name, phone: data.phone, whatsapp: data.whatsapp, telegram: data.telegram, city: data.city, area: data.area, district: data.district });
       if (!editId) store.del('draft');
-      toast(t(editId ? 'saved' : 'publishedOk'));
+      toast(t(review ? 'reviewSent' : editId ? 'saved' : 'publishedOk'));
       go(`/item/${id}`, { replace: true });
     } catch (err) {
       button.disabled = false;

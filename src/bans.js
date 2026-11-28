@@ -64,7 +64,7 @@ export async function ban(env, owner, days = 0) {
     env.DB.prepare(`DELETE FROM reports WHERE listing_id IN (${mine})`).bind(owner),
     env.DB.prepare('DELETE FROM complaints WHERE target = ?').bind(owner),
     // ждавшее проверки после жалоб остаётся скрытым и после блокировки
-    env.DB.prepare("UPDATE listings SET hide_reason = ?2 WHERE owner = ?1 AND status = 'hidden' AND hide_reason = ''").bind(owner, REPORTED),
+    env.DB.prepare("UPDATE listings SET hide_reason = ?2 WHERE owner = ?1 AND status = 'hidden' AND hide_reason = '' AND held = ''").bind(owner, REPORTED),
     env.DB.prepare(
       "UPDATE listings SET ban_status = status, status = 'hidden', approved = 0, hide_reason = ? WHERE owner = ? AND status != 'hidden'"
     ).bind(BAN_NOTE, owner),

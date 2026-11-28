@@ -27,7 +27,9 @@ const STATEMENTS = [
     area TEXT NOT NULL DEFAULT '',
     contacts INTEGER NOT NULL DEFAULT 0,
     hide_reason TEXT NOT NULL DEFAULT '',
-    ban_status TEXT NOT NULL DEFAULT ''
+    ban_status TEXT NOT NULL DEFAULT '',
+    hidden_from TEXT NOT NULL DEFAULT '',
+    held TEXT NOT NULL DEFAULT ''
   )`,
   `CREATE INDEX IF NOT EXISTS listings_feed ON listings (status, bumped_at DESC)`,
   `CREATE INDEX IF NOT EXISTS listings_city ON listings (status, city, bumped_at DESC)`,
@@ -140,8 +142,10 @@ const STATEMENTS = [
 const COLUMNS = {
   listings: {
     old_price: 'INTEGER NOT NULL DEFAULT 0', area: "TEXT NOT NULL DEFAULT ''", contacts: 'INTEGER NOT NULL DEFAULT 0',
-    // почему скрыто (видно автору) и каким объявление было до блокировки
-    hide_reason: "TEXT NOT NULL DEFAULT ''", ban_status: "TEXT NOT NULL DEFAULT ''",
+    // почему скрыто (видно автору), каким объявление было до блокировки и до скрытия модератором или сайтом
+    hide_reason: "TEXT NOT NULL DEFAULT ''", ban_status: "TEXT NOT NULL DEFAULT ''", hidden_from: "TEXT NOT NULL DEFAULT ''",
+    // ждёт модератора из-за стоп-слов: 'new' — ещё не публиковалось, 'edit' — после изменения
+    held: "TEXT NOT NULL DEFAULT ''",
   },
   bans: { until: 'INTEGER NOT NULL DEFAULT 0', owner: "TEXT NOT NULL DEFAULT ''" },
   shops: { ban_status: "TEXT NOT NULL DEFAULT ''" },

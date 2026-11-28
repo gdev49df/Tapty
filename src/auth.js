@@ -23,6 +23,17 @@ async function newCode() {
   return { shown: code.match(/.{4}/g).join('-'), salt, hash: await sha256(salt + code) };
 }
 
+const cleanName = (value) => {
+  const name = String(value ?? '').replace(/\s+/g, ' ').trim();
+  return name.length < 2 || name.length > 40 ? fail(400, 'invalid', 'name') : name;
+};
+
+async function saveCode(env, id) {
+  const code = await newCode();
+  await env.DB.prepare('UPDATE users SET rec_hash = ?, rec_salt = ? WHERE id = ?').bind(code.hash, code.salt, id).run();
+  return code.shown;
+}
+
 async function passwordColumns(key) {
   const salt = randomHex(16);
   return [await sha256(salt + key), salt];
@@ -57,8 +68,7 @@ async function open(env, who, user, extra = {}) {
 
 export async function register(request, env, who) {
   const { body, login, key } = await credentials(request);
-  const name = String(body.name ?? '').replace(/\s+/g, ' ').trim();
-  if (name.length < 2 || name.length > 40) fail(400, 'invalid', 'name');
+  const name = cleanName(body.name);
   // Без согласия с действующей редакцией документов аккаунт не создаётся.
   if (body.consent !== LEGAL_VERSION) fail(400, 'consent');
   await limit(env, `register:${who.ip}`, 20, 86400);
@@ -131,9 +141,7 @@ export async function changePassword(request, env, who) {
 
 export async function replaceCode(request, env, who) {
   await confirmPassword(request, env, who);
-  const code = await newCode();
-  await env.DB.prepare('UPDATE users SET rec_hash = ?, rec_salt = ? WHERE id = ?').bind(code.hash, code.salt, who.owner).run();
-  return json({ code: code.shown });
+  return json({ code: await saveCode(env, who.owner) });
 }
 
 // Всё, что принадлежит человеку: ?1 — номер аккаунта. Порядок важен — чаты и объявления
@@ -162,18 +170,44 @@ export async function deleteAccount(request, env, who) {
   // У заблокированного разбирательство уже закончено.
   const held = await env.DB.prepare(
     `SELECT 1 WHERE EXISTS (SELECT 1 FROM complaints WHERE target = ?1)
-       OR (EXISTS (SELECT 1 FROM listings WHERE owner = ?1 AND status = 'hidden')
+       OR (EXISTS (SELECT 1 FROM listings WHERE owner = ?1 AND status = 'hidden' AND held = '')
            AND NOT EXISTS (SELECT 1 FROM bans WHERE value = ?1))`
   )
     .bind(who.owner)
     .first();
   if (held) fail(409, 'under_review');
+  await eraseAccount(env, who.owner);
+  return json({ ok: true });
+}
+
+async function eraseAccount(env, id) {
   // Если фото лежат в R2, сначала убираются файлы: после записей в базе их уже не найти.
   if (env.PHOTOS) {
-    const { results } = await env.DB.prepare(`SELECT id FROM photos WHERE ${MY_PHOTOS}`).bind(who.owner).all();
+    const { results } = await env.DB.prepare(`SELECT id FROM photos WHERE ${MY_PHOTOS}`).bind(id).all();
     await deletePhotoFiles(env, results.map((r) => r.id));
   }
-  await env.DB.batch(ERASE.map((sql) => env.DB.prepare(sql).bind(who.owner)));
+  await env.DB.batch(ERASE.map((sql) => env.DB.prepare(sql).bind(id)));
+}
+
+// ---------- действия модератора с аккаунтом (доступ проверяет воркер) ----------
+
+// rename — другое имя; code — новый резервный код тому, кто потерял пароль; delete — стереть аккаунт.
+export async function manageAccount(env, id, { action, name, login }) {
+  const user = await env.DB.prepare('SELECT name, login FROM users WHERE id = ? AND login IS NOT NULL').bind(id).first();
+  if (!user) fail(404, 'not_found');
+  if (action === 'rename') {
+    const next = cleanName(name);
+    await env.DB.batch([
+      env.DB.prepare('UPDATE users SET name = ? WHERE id = ?').bind(next, id),
+      // в объявлениях имя меняется там, где стояло прежнее
+      env.DB.prepare('UPDATE listings SET name = ? WHERE owner = ? AND name = ?').bind(next, id, user.name),
+    ]);
+    return json({ ok: true });
+  }
+  if (action === 'code') return json({ code: await saveCode(env, id) });
+  // удаление не вернуть: модератор вводит логин, чтобы не стереть не того
+  if (String(login ?? '').trim().toLowerCase() !== user.login) fail(400, 'invalid', 'login');
+  await eraseAccount(env, id);
   return json({ ok: true });
 }
 

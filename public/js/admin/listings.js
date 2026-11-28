@@ -10,12 +10,17 @@ import { showUser } from './users.js';
 
 const REASONS = ['Запрещённый товар', 'Похоже на мошенничество', 'Неверная категория', 'Повторное объявление', 'Оскорбления или спам', 'Неверная цена или описание'];
 const EMPTY = { flagged: 'Подозрительных объявлений нет.', hidden: 'Скрытых объявлений нет.', all: 'Объявлений пока нет.' };
-const DONE = { hide: 'Скрыто', show: 'Показывается', delete: 'Удалено' };
+const DONE = { hide: 'Скрыто', show: 'Одобрено', delete: 'Удалено' };
+// Скрыто модератором или сайтом либо ждёт проверки — на сайте этого никто не видит.
+export const unseen = (item) => item.status === 'hidden' || item.status === 'review';
+// проданное возвращается проданным, поэтому и кнопка называет это прямо
+export const backText = ({ status, before }) =>
+  before === 'sold' ? 'Вернуть как проданное' : status === 'review' ? 'Одобрить' : 'Вернуть в ленту';
 
 let view = '';
 
 // Выполняет действие над объявлениями. false — передумали на выборе причины.
-async function moderate(ids, action) {
+export async function moderate(ids, action) {
   let reason = '';
   if (action === 'hide') {
     reason = await askReason({
@@ -30,6 +35,22 @@ async function moderate(ids, action) {
   return true;
 }
 
+// Кнопки прямо под пометкой «Скрыто» или «На проверке»: решить, не открывая объявление.
+export const hiddenActions = (item, banned) => `
+  <div class="adm-buttons adm-acts">${
+    banned ? '' : `<button type="button" class="btn small" data-quick="show" data-id="${item.id}">${backText(item)}</button>`
+  }<button type="button" class="btn small ghost warn" data-quick="delete" data-id="${item.id}">Удалить</button></div>`;
+
+// Нажатие на одну из этих кнопок. true — это была она.
+export function quickClick(e, done) {
+  const button = e.target.closest('[data-quick]');
+  if (!button) return false;
+  const action = button.dataset.quick;
+  if (action === 'delete' && !sure(button)) return true;
+  run(button, async () => (await moderate([Number(button.dataset.id)], action)) && done());
+  return true;
+}
+
 const line = (item) => `
   <tr data-key="listing-${item.id}">
     <td class="pick"><label><input type="checkbox" value="${item.id}" aria-label="Выбрать: ${esc(item.title)}"></label></td>
@@ -39,7 +60,9 @@ const line = (item) => `
     <td data-label="Подано">${dayText(item.createdAt)}<small>${esc(cityRu(item.city))}</small></td>
     <td class="state"><div class="adm-badges">${statusBadge(item.status)}${item.reports ? badge(`Жалоб: ${item.reports}`, 'warn') : ''}${item.flags
       .map((w) => badge(w, 'mark'))
-      .join('')}</div>${item.hideReason ? `<small>${esc(item.hideReason)}</small>` : ''}</td>
+      .join('')}</div>${item.hideReason ? `<small>${esc(item.hideReason)}</small>` : ''}${
+      unseen(item) ? hiddenActions(item, item.banned) : ''
+    }</td>
   </tr>`;
 
 export default async function listings(ctx) {
@@ -51,13 +74,13 @@ export default async function listings(ctx) {
   if (!ctx.alive() || view !== current) return;
   let next = data.next;
   ctx.box.innerHTML = `
-    ${segments([['flagged', 'Под вопросом', counts.listings], ['hidden', 'Скрытые'], ['all', 'Все']], view)}
-    ${current === 'flagged' ? '<p class="muted small">В тексте есть стоп-слова. Список слов меняется в настройках. «Оставить» убирает объявление отсюда.</p>' : ''}
+    ${segments([['flagged', 'Под вопросом', counts.listings], ['hidden', 'Скрытые', counts.hidden], ['all', 'Все']], view)}
+    ${current === 'flagged' ? '<p class="muted small">В тексте есть стоп-слова. «На проверке» ещё не опубликованы, остальные уже в ленте. «Одобрить» публикует и убирает отсюда. Список слов меняется в настройках.</p>' : ''}
     ${
       data.items.length
         ? `<div class="adm-bulk" hidden>
              <b></b>
-             <button type="button" class="btn small" data-bulk="show">${{ flagged: 'Оставить', hidden: 'Вернуть', all: 'Одобрить' }[current]}</button>
+             <button type="button" class="btn small" data-bulk="show">${current === 'hidden' ? 'Вернуть' : 'Одобрить'}</button>
              ${current === 'hidden' ? '' : '<button type="button" class="btn small ghost" data-bulk="hide">Скрыть</button>'}
              <button type="button" class="btn small danger" data-bulk="delete">Удалить</button>
            </div>
@@ -79,6 +102,7 @@ export default async function listings(ctx) {
       ctx.select(`listing-${open.dataset.open}`);
       return showListing(ctx, Number(open.dataset.open));
     }
+    if (quickClick(e, () => ctx.done())) return;
     const bulk = e.target.closest('[data-bulk]');
     if (bulk) {
       const action = bulk.dataset.bulk;
@@ -132,13 +156,13 @@ export async function showListing(ctx, id) {
   }
   if (!panel.alive()) return;
   const { item, reasons, flags, author } = data;
-  const hidden = item.status === 'hidden';
+  const hidden = unseen(item);
   const waiting = Object.keys(reasons).length || flags.length;
   const buttons = [
     // вернуть скрытое или снять подозрения с показываемого
-    !author.banned && (hidden || waiting) && `<button type="button" class="btn small" data-act="show">${hidden ? 'Вернуть в ленту' : 'Оставить'}</button>`,
+    !author.banned && (hidden || waiting) && `<button type="button" class="btn small" data-act="show">${hidden ? backText(item) : 'Одобрить'}</button>`,
     // у скрытого сайтом причины ещё нет: модератор может назвать её
-    (!hidden || !item.hideReason) && '<button type="button" class="btn small ghost" data-act="hide">Скрыть</button>',
+    (item.status !== 'hidden' || !item.hideReason) && '<button type="button" class="btn small ghost" data-act="hide">Скрыть</button>',
     '<button type="button" class="btn small ghost warn" data-act="delete">Удалить</button>',
   ].filter(Boolean);
   panel.body.innerHTML = `

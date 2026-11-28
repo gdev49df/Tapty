@@ -39,6 +39,14 @@ export async function stopWords(env) {
   return row ? JSON.parse(row.value) : STOP_WORDS;
 }
 
+// Слово ищется с начала: «ставки» не найдётся в «поставки».
+const starts = (word) => new RegExp(`(?<![\\p{L}\\p{N}])${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'u');
+// Возвращает функцию: какие стоп-слова есть в тексте объявления (row.search).
+export const matcher = (words) => {
+  const rules = words.map((w) => [w, starts(w)]);
+  return (row) => rules.filter(([, re]) => re.test(row.search)).map(([w]) => w);
+};
+
 export async function getSettings(env) {
   cache = null;
   return json({ site: await siteSettings(env), stopwords: await stopWords(env) });

@@ -23,9 +23,9 @@ export default async function queue(ctx) {
         <span class="adm-row-text">
           <strong>${esc(chat ? `Жалоба на пользователя ${item.accused}` : item.title)}</strong>
           <span>${esc(reasonList(item.reasons) || 'Ждёт проверки')}</span>
-          <small>${chat ? `Переписка, от пользователя ${esc(item.author)}` : 'Объявление'}, с ${dayText(item.at)}${item.hidden ? '. Скрыто после жалоб' : ''}</small>
+          <small>${chat ? `Переписка, от пользователя ${esc(item.author)}` : 'Объявление'}, с ${dayText(item.at)}${item.hidden ? '. Скрыто сайтом после жалоб' : ''}</small>
         </span>
-        ${level(item)}
+        <span class="adm-marks">${level(item)}${item.hidden ? badge('Скрыто', 'bad') : ''}${item.review ? badge('На проверке', 'warn') : ''}</span>
       </button></li>`;
     })
     .join('')}</ul>`;
