@@ -77,6 +77,8 @@ export async function api(path, options) {
   const data = await res.json().catch(() => null);
   // Сессия больше не действует.
   if (data?.error === 'login_required') dropSession();
+  // На сайте идут технические работы: об этом узнаёт экран-заглушка.
+  if (data?.error === 'maintenance') dispatchEvent(new Event('tapty:maintenance'));
   if (!res.ok || !data) throw new ApiError(res.status, data?.error || 'server', data?.field);
   return data;
 }
@@ -95,6 +97,11 @@ export function config() {
     throw e;
   });
   return configPromise;
+}
+
+export function refreshConfig() {
+  configPromise = null;
+  return config();
 }
 
 // Вошедший пользователь; протухшую сессию убираем.

@@ -8,6 +8,9 @@ import * as chat from './chat.js';
 import * as reviews from './reviews.js';
 import * as favorites from './favorites.js';
 import * as shops from './shops.js';
+import * as panel from './panel.js';
+import { getSettings, publicConfig, saveSettings, siteSettings } from './site.js';
+import { liftExpired, liftSometimes } from './bans.js';
 import { draftFromPhoto } from './ai.js';
 import { CITIES } from '../public/js/catalog.js';
 
@@ -51,7 +54,10 @@ async function api(request, env, ctx, url) {
   const who = await identify(request, env, ctx);
   let m;
 
-  if (method === 'GET' && path === '/config') return json({ ai: Boolean(env.AI) });
+  if (method === 'GET' && path === '/config') return publicConfig(env);
+  // Во время технических работ отвечают только настройки и админка.
+  if (!path.startsWith('/admin/') && (await siteSettings(env)).maintenance) fail(503, 'maintenance');
+  await liftSometimes(env);
   if (method === 'GET' && path === '/me') {
     const { user } = who;
     return json({ user: user ? { name: user.name, login: user.login, recovery: Boolean(user.recovery) } : null });
@@ -138,18 +144,36 @@ async function api(request, env, ctx, url) {
   if (path.startsWith('/admin/')) {
     if (method === 'POST' && path === '/admin/session') return openAdmin(request, env, who);
     await requireAdmin(request, env, who);
-    if (method === 'GET' && path === '/admin/reports') return listings.adminReports(env);
-    if (method === 'GET' && path === '/admin/complaints') return chat.adminComplaints(env);
+    // всё, что показывает админка, должно учитывать уже вышедшие сроки блокировок
+    await liftExpired(env);
+    if (method === 'GET' && path === '/admin/counts') return panel.counts(env);
+    if (method === 'GET' && path === '/admin/stats') return panel.stats(env);
+    if (method === 'GET' && path === '/admin/queue') return panel.queue(env);
+    if (path === '/admin/listings') {
+      if (method === 'GET') return panel.listingList(env, url);
+      if (method === 'POST') return panel.listingAction(request, env);
+    }
+    if (method === 'GET' && (m = /^\/admin\/listings\/(\d{1,12})$/.exec(path))) return panel.listingDetail(env, Number(m[1]));
+    if (method === 'GET' && path === '/admin/users') return panel.userList(env, url);
+    // номер аккаунта (u:… или d:…) либо заблокированный телефон
+    if ((m = /^\/admin\/users\/([ud]:[a-f0-9]{24,64}|\d{11})$/.exec(path))) {
+      if (method === 'GET') return panel.userDetail(env, m[1]);
+      if (method === 'POST') return panel.userAction(request, env, m[1]);
+    }
     if (method === 'GET' && (m = /^\/admin\/chat-photos\/([a-f0-9]{24})$/.exec(path))) return chat.adminChatPhoto(env, m[1]);
-    if (method === 'POST' && (m = /^\/admin\/complaints\/(\d{1,12})$/.exec(path))) return chat.adminComplaint(request, env, Number(m[1]));
+    if (method === 'DELETE' && (m = /^\/admin\/complaints\/(\d{1,12})$/.exec(path))) return chat.adminComplaint(env, Number(m[1]));
     if (method === 'GET' && path === '/admin/shops') return shops.adminShops(env);
-    if (method === 'POST' && (m = /^\/admin\/shops\/(\d{1,12})$/.exec(path))) return shops.adminShop(request, env, Number(m[1]));
+    if ((m = /^\/admin\/shops\/(\d{1,12})$/.exec(path))) {
+      if (method === 'GET') return shops.adminShopPreview(env, Number(m[1]));
+      if (method === 'POST') return shops.adminShop(request, env, Number(m[1]));
+    }
     if (method === 'GET' && path === '/admin/reviews') return reviews.adminReviews(env);
     if (method === 'DELETE' && (m = /^\/admin\/reviews\/(\d{1,12})$/.exec(path))) {
       return reviews.adminDeleteReview(env, Number(m[1]));
     }
-    if (method === 'POST' && (m = /^\/admin\/(\d{1,12})$/.exec(path))) {
-      return listings.adminAction(request, env, Number(m[1]));
+    if (path === '/admin/settings') {
+      if (method === 'GET') return getSettings(env);
+      if (method === 'PUT') return saveSettings(request, env);
     }
   }
   fail(404, 'not_found');

@@ -203,6 +203,13 @@ export function cardHtml(item) {
 export const skeleton = (n = 10) =>
   Array.from({ length: n }, () => '<div class="card skel" aria-hidden="true"><span class="card-photo"></span><span></span><span></span></div>').join('');
 
+// Автору скрытого объявления: за что и куда писать.
+export const hiddenWhy = (reason) => `
+  <div class="why">
+    <p>${esc(reason ? `${t('hideReason')}: ${reason}` : t('hideWaiting'))}</p>
+    <p class="small">${esc(t('hideAppeal'))} <a href="mailto:work@gdev.uk">work@gdev.uk</a></p>
+  </div>`;
+
 export function emptyState(title, hint, action = '') {
   return `<div class="empty"><div class="empty-mark" aria-hidden="true"></div><h2>${esc(title)}</h2><p>${esc(hint)}</p>${action}</div>`;
 }

@@ -1,290 +1,274 @@
 // Модерация: открывается по адресу /admin и ключу из секрета ADMIN_KEY. Если задан секрет
 // ADMIN_TOTP, дополнительно нужен код из приложения-аутентификатора.
-import { api, apiBlob } from '../api.js';
-import { cityName, $, errorText, esc, phoneText, priceText, shopLogo, toast } from '../ui.js';
+// На компьютере слева меню, в середине список, справа карточка; на телефоне разделы сверху.
+import { icon } from '../icons.js';
+import { $, $$, esc, toast } from '../ui.js';
+import { access, failed, loading, openSession, problem, send } from '../admin/common.js';
+import overview from '../admin/overview.js';
+import queue from '../admin/queue.js';
+import listings from '../admin/listings.js';
+import shops from '../admin/shops.js';
+import users from '../admin/users.js';
+import reviews from '../admin/reviews.js';
+import settings from '../admin/settings.js';
 
-let adminKey = '';
-// пропуск после кода из приложения, живёт 12 часов и только в этой вкладке
-let adminPass = '';
-
-const MESSAGES = {
-  forbidden: 'Неверный ключ',
-  not_found: 'Сначала задайте секрет ADMIN_KEY',
-  bad_totp: 'Код не подошёл. Дождитесь следующего и введите его',
-  totp_config: 'Секрет ADMIN_TOTP записан неверно',
+const SECTIONS = {
+  overview: ['Обзор', 'grid', overview],
+  queue: ['Жалобы', 'flag', queue],
+  listings: ['Объявления', 'file', listings],
+  shops: ['Магазины', 'store', shops],
+  users: ['Пользователи', 'user', users],
+  reviews: ['Отзывы', 'star', reviews],
+  settings: ['Настройки', 'sliders', settings],
 };
+// у этих разделов на вкладке число того, что ждёт решения
+const COUNTED = ['queue', 'listings', 'shops'];
 
-function newSecret() {
-  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-  return [...crypto.getRandomValues(new Uint8Array(32))].map((b) => alphabet[b & 31]).join('');
+// Свои стили подключаются при первом открытии: посетителям они не нужны.
+function styles() {
+  let link = $('link[data-admin]');
+  if (link) return Promise.resolve();
+  link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.href = '/css/admin.css';
+  link.dataset.admin = '';
+  return new Promise((resolve) => {
+    link.onload = resolve;
+    link.onerror = () => {
+      link.remove();
+      resolve();
+    };
+    document.head.append(link);
+  });
 }
 
-export default function admin({ root, alive }) {
-  root.innerHTML = `
-    <div class="page-head"><h1>Модерация</h1></div>
-    <div class="narrow">
-      <form class="form">
-        <label class="field"><span>Ключ администратора</span><input class="input" name="key" type="password" autocomplete="off"></label>
-        <label class="field" data-code hidden><span>Код из приложения</span><input class="input" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7"></label>
-        <button class="btn wide">Открыть</button>
-      </form>
-      <div class="setup"></div>
-      <div class="shop-queue"></div>
-      <div class="queue"></div>
-      <div class="chat-queue"></div>
-      <div class="review-queue"></div>
-    </div>`;
-  const queue = $('.queue', root);
-  const headers = () => ({ 'x-admin-key': encodeURIComponent(adminKey), ...(adminPass && { 'x-admin-pass': adminPass }) });
-  const form = $('form', root);
-  const codeField = $('[data-code]', root);
-  const setup = $('.setup', root);
+export default async function admin({ root, query, alive, onLeave }) {
+  document.title = 'Модерация · tapty.';
+  await styles();
+  if (!alive()) return;
 
-  // Показывается, пока вход по одному ключу: секрет создаётся в браузере и никуда не отправляется.
-  function offerCode() {
-    setup.innerHTML = `<article class="my">
-      <p><strong>Вход по коду выключен.</strong> Включите, чтобы одного ключа было мало.</p>
-      <div class="my-actions"><button type="button" class="btn small" data-setup>Создать секрет</button></div>
-    </article>`;
-  }
-
-  setup.addEventListener('click', (e) => {
-    if (!e.target.closest('[data-setup]')) return;
-    const secret = newSecret();
-    setup.innerHTML = `<article class="my">
-      <p>1. В Google Authenticator нажмите «+», «Ввести ключ настройки», имя tapty, тип «по времени» и вставьте секрет.</p>
-      <code class="backup-code">${secret.match(/.{4}/g).join(' ')}</code>
-      <div class="my-actions"><a class="btn small ghost" href="otpauth://totp/tapty:admin?secret=${secret}&amp;issuer=tapty">Открыть в приложении на телефоне</a></div>
-      <p>2. В Cloudflare откройте Workers &amp; Pages, tapty, Settings, Variables and Secrets и добавьте секрет <code>ADMIN_TOTP</code> с этим же значением.</p>
-      <p class="muted small">Секрет виден только сейчас. Никому его не пересылайте.</p>
-    </article>`;
-  });
-  const reviewBox = $('.review-queue', root);
-
-  const shopBox = $('.shop-queue', root);
-  const shopStates = { approved: 'Открыт', closed: 'Закрыт' };
-
-  const shopCard = (s) => {
-    const button = (action, text, cls = 'ghost') =>
-      `<button type="button" class="btn small ${cls}" data-shop="${s.id}" data-rev="${s.rev}" data-action-shop="${action}">${text}</button>`;
-    const reason = '<input class="input" data-reason maxlength="200" placeholder="Причина, её увидит пользователь" aria-label="Причина">';
-    return `<article class="my">
-      <div class="my-main">${shopLogo(s)}
-        <span><strong>${esc(s.name)}</strong>
-          <small>${esc(s.person || '')}, логин ${esc(s.login || '')}, объявлений: ${s.ads}</small>
-          <small>${esc([cityName(s.city), s.address, s.hours].filter(Boolean).join(', '))}</small>
-          <small>${esc(phoneText(s.phone))}</small></span></div>
-      <p class="desc">${esc(s.about)}</p>
-      ${s.status === 'pending' ? '' : `<p class="muted small">${shopStates[s.status]}${s.note ? `: ${esc(s.note)}` : ''}</p>`}
-      ${s.status === 'closed' ? '' : reason}
-      <div class="my-actions">${
-        s.status === 'pending'
-          ? button('approve', 'Открыть магазин', '') + button('reject', 'Отклонить')
-          : s.status === 'approved'
-            ? `<a class="btn small ghost" href="/shop/${s.id}">Страница</a>${button('close', 'Закрыть', 'danger')}`
-            : button('reopen', 'Открыть снова')
-      }</div>
-    </article>`;
-  };
-
-  async function loadShops() {
-    const { items } = await api('/admin/shops', { headers: headers() });
-    if (!alive()) return;
-    const waiting = items.filter((s) => s.status === 'pending');
-    const decided = items.filter((s) => s.status !== 'pending');
-    shopBox.innerHTML = `<h2>Заявки на магазины${waiting.length ? ` (${waiting.length})` : ''}</h2>
-      ${waiting.length ? waiting.map(shopCard).join('') : '<p class="muted">Новых заявок нет.</p>'}
-      ${decided.length ? `<details><summary>Магазины: ${decided.length}</summary>${decided.map(shopCard).join('')}</details>` : ''}`;
-  }
-
-  shopBox.addEventListener('click', async (e) => {
-    const btn = e.target.closest('[data-action-shop]');
-    if (!btn) return;
-    const { shop, rev, actionShop: action } = btn.dataset;
-    const note = btn.closest('.my').querySelector('[data-reason]')?.value.trim() ?? '';
-    if (['reject', 'close'].includes(action)) {
-      if (!note) {
-        btn.closest('.my').querySelector('[data-reason]').focus();
-        return toast('Напишите причину');
-      }
-      if (action === 'close' && !btn.dataset.sure) {
-        btn.dataset.sure = '1';
-        btn.textContent = 'Точно?';
-        return;
-      }
-    }
-    btn.disabled = true;
-    try {
-      await api(`/admin/shops/${shop}`, { method: 'POST', body: { action, rev: Number(rev), note }, headers: headers() });
-      await loadShops();
-    } catch (err) {
-      btn.disabled = false;
-      toast(errorText(err));
-      // заявку успели изменить или удалить: показываем, как она выглядит сейчас
-      if (['shop_changed', 'not_found'].includes(err.code)) await loadShops().catch(() => {});
-    }
-  });
-
-  async function loadReviews() {
-    const { items } = await api('/admin/reviews', { headers: headers() });
-    if (!alive()) return;
-    reviewBox.innerHTML = `<h2>Последние отзывы</h2>${
-      items.length
-        ? items
-            .map(
-              (r) => `<article class="my">
-                <p><strong>${esc(r.author)}</strong> о продавце <strong>${esc(r.seller)}</strong>, оценка ${r.rating} из 5</p>
-                <p class="desc">${esc(r.text)}</p>
-                <div class="my-actions"><button class="btn small ghost" data-review="${r.id}">Удалить отзыв</button></div>
-              </article>`
-            )
-            .join('')
-        : '<p class="muted">Отзывов нет.</p>'
-    }`;
-  }
-
-  reviewBox.addEventListener('click', async (e) => {
-    const btn = e.target.closest('[data-review]');
-    if (!btn) return;
-    if (!btn.dataset.sure) {
-      btn.dataset.sure = '1';
-      btn.textContent = 'Точно?';
-      return;
-    }
-    try {
-      await api(`/admin/reviews/${btn.dataset.review}`, { method: 'DELETE', headers: headers() });
-      await loadReviews();
-    } catch (err) {
-      toast(errorText(err));
-    }
-  });
-
-  const complaintBox = $('.chat-queue', root);
-  const reasons = { fraud: 'мошенничество', spam: 'спам', insult: 'оскорбления', other: 'другое' };
-
-  async function loadComplaints() {
-    const { items } = await api('/admin/complaints', { headers: headers() });
-    if (!alive()) return;
-    complaintBox.innerHTML = `<h2>Жалобы из чатов</h2>${
-      items.length
-        ? items
-            .map(
-              (c) => `<article class="my">
-                <p><strong>${esc(c.author)}</strong> жалуется на <strong>${esc(c.accused)}</strong>: ${esc(reasons[c.reason] || c.reason)}${c.banned ? ' (уже заблокирован)' : ''}</p>
-                <p class="muted small">Объявление: ${esc(c.title)}</p>
-                ${c.comment ? `<p class="desc">${esc(c.comment)}</p>` : ''}
-                <details><summary>Переписка</summary><ul class="log">${c.messages
-                  .map(
-                    (m) => `<li${m.accused ? ' class="accused"' : ''}><b>${esc(m.accused ? c.accused : c.author)}:</b> ${
-                      m.photo ? `<button type="button" class="btn small ghost" data-shot="${esc(m.photo)}">Показать фото</button>` : esc(m.text)
-                    }</li>`
-                  )
-                  .join('')}</ul></details>
-                <div class="my-actions">
-                  <button class="btn small ghost" data-complaint="${c.id}" data-verdict="dismiss">Отклонить жалобу</button>
-                  <button class="btn small danger" data-complaint="${c.id}" data-verdict="ban">Заблокировать пользователя</button>
-                </div>
-              </article>`
-            )
-            .join('')
-        : '<p class="muted">Жалоб из чатов нет.</p>'
-    }`;
-  }
-
-  complaintBox.addEventListener('click', async (e) => {
-    const shot = e.target.closest('[data-shot]');
-    const btn = e.target.closest('[data-complaint]');
-    try {
-      if (shot) {
-        const url = URL.createObjectURL(await apiBlob(`/admin/chat-photos/${shot.dataset.shot}`, { headers: headers() }));
-        const img = new Image();
-        img.alt = 'Фото из переписки';
-        img.onload = () => URL.revokeObjectURL(url);
-        img.src = url;
-        shot.replaceWith(img);
-      }
-      if (!btn) return;
-      if (btn.dataset.verdict === 'ban' && !btn.dataset.sure) {
-        btn.dataset.sure = '1';
-        btn.textContent = 'Точно?';
-        return;
-      }
-      await api(`/admin/complaints/${btn.dataset.complaint}`, { method: 'POST', body: { action: btn.dataset.verdict }, headers: headers() });
-      await load();
-    } catch (err) {
-      toast(errorText(err));
-    }
-  });
-
-  async function load() {
-    try {
-      const { items } = await api('/admin/reports', { headers: headers() });
-      if (!alive()) return;
-      form.hidden = true;
-      if (!adminPass && !setup.innerHTML) offerCode();
-      queue.innerHTML = `<h2>Жалобы на объявления</h2>${items.length
-        ? items
-            .map(
-              (i) => `<article class="my">
-                <a href="/item/${i.id}" class="my-main">
-                  <span class="my-photo">${i.photo ? `<img src="/p/${i.photo}/t" alt="">` : ''}</span>
-                  <span><strong>${esc(i.title)}</strong><b>${esc(priceText(i))}</b>
-                    <small>${esc(phoneText(i.phone))}, жалоб: ${i.reports} ${esc(i.reasons)}</small>
-                    <small>${i.status === 'hidden' ? 'Скрыто' : 'Показывается'}</small></span>
-                </a>
-                <p class="desc">${esc(i.description.slice(0, 300))}</p>
-                <div class="my-actions">
-                  <button class="btn small" data-id="${i.id}" data-action="approve">Оставить</button>
-                  <button class="btn small ghost" data-id="${i.id}" data-action="hide">Скрыть</button>
-                  <button class="btn small ghost" data-id="${i.id}" data-action="delete">Удалить</button>
-                  <button class="btn small danger" data-id="${i.id}" data-action="ban">Заблокировать продавца</button>
-                </div>
-              </article>`
-            )
-            .join('')
-        : '<p class="muted">Жалоб нет.</p>'}`;
-      await loadShops();
-      await loadComplaints();
-      await loadReviews();
-    } catch (e) {
-      if (e.code !== 'code_required') return toast(MESSAGES[e.code] || errorText(e));
-      // ключ верный, нужен код (или пропуск истёк)
-      adminPass = '';
-      form.hidden = false;
-      codeField.hidden = false;
-      form.elements.code.focus();
-    }
-  }
-
-  form.onsubmit = async (e) => {
-    e.preventDefault();
-    adminKey = form.elements.key.value.trim();
-    const code = form.elements.code.value.trim();
-    if (!codeField.hidden && code) {
+  function login(needCode = false) {
+    document.documentElement.classList.remove('adm-locked');
+    root.innerHTML = `
+      <div class="adm-login">
+        <a href="/" class="logo"><img src="/img/tapty.svg" alt="tapty." width="83" height="28"></a>
+        <h1>Модерация</h1>
+        <form class="form">
+          <label class="field"><span>Ключ администратора</span><input class="input" name="key" type="password" autocomplete="off" value="${esc(access.key)}"></label>
+          <label class="field" data-code${needCode ? '' : ' hidden'}><span>Код из приложения</span><input class="input" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7"></label>
+          <button class="btn wide">Открыть</button>
+        </form>
+      </div>`;
+    const form = $('form', root);
+    const codeField = $('[data-code]', root);
+    form.elements[needCode ? 'code' : 'key'].focus();
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const button = $('button', form);
+      access.key = form.elements.key.value.trim();
+      const code = form.elements.code.value.trim();
+      button.disabled = true;
       try {
-        ({ pass: adminPass } = await api('/admin/session', { method: 'POST', body: { code }, headers: headers() }));
-        form.elements.code.value = '';
+        if (!codeField.hidden && code) ({ pass: access.pass } = await openSession(code));
+        await send('/counts');
+        if (alive()) panelView();
       } catch (err) {
-        return toast(MESSAGES[err.code] || errorText(err));
+        button.disabled = false;
+        // ключ верный, нужен код
+        if (err.code === 'code_required') {
+          access.pass = '';
+          codeField.hidden = false;
+          form.elements.code.focus();
+        } else toast(err.code === 'not_found' ? 'Сначала задайте секрет ADMIN_KEY' : problem(err));
+      }
+    };
+  }
+
+  let leave = () => {};
+
+  function panelView() {
+    leave();
+    let tab = Object.hasOwn(SECTIONS, query.get('tab')) ? query.get('tab') : 'overview';
+    let turn = 0;
+    let panelTurn = 0;
+    let selected = '';
+    let opener = null;
+    let cleanups = [];
+
+    root.innerHTML = `
+      <div class="adm">
+        <aside class="adm-side">
+          <div class="adm-brand">
+            <a href="/" class="logo"><img src="/img/tapty.svg" alt="tapty." width="83" height="28"></a>
+            <div class="adm-exits">
+              <a href="/">На сайт</a>
+              <button type="button" data-exit>${icon('logout')}Выйти</button>
+            </div>
+          </div>
+          <nav class="adm-nav" aria-label="Разделы модерации">${Object.entries(SECTIONS)
+            .map(([id, [name, ic]]) => `<button type="button" data-tab="${id}">${icon(ic)}<span>${name}</span>${COUNTED.includes(id) ? '<b hidden></b>' : ''}</button>`)
+            .join('')}</nav>
+        </aside>
+        <div class="adm-main">
+          <header class="adm-head"><h1></h1><button type="button" class="icon-btn" data-refresh aria-label="Обновить">${icon('refresh')}</button></header>
+          <div class="adm-content"></div>
+        </div>
+        <aside class="adm-panel" aria-label="Подробности" tabindex="-1" hidden>
+          <div class="adm-panel-head"><h2></h2><button type="button" class="icon-btn" data-close aria-label="Закрыть">${icon('close')}</button></div>
+          <div class="adm-panel-body"></div>
+        </aside>
+      </div>`;
+    const shell = $('.adm', root);
+    const side = $('.adm-panel', root);
+    // содержимое раздела и карточки каждый раз новое, вместе с обработчиками
+    const fresh = (selector) => {
+      const old = $(selector, root);
+      const next = old.cloneNode(false);
+      old.replaceWith(next);
+      return next;
+    };
+
+    const paintSelection = () => $$('.adm-content [data-key]', root).forEach((el) => el.classList.toggle('selected', el.dataset.key === selected));
+
+    const panel = {
+      show(title) {
+        const turnNow = ++panelTurn;
+        if (side.hidden) opener = document.activeElement;
+        side.hidden = false;
+        shell.classList.add('with-panel');
+        document.documentElement.classList.add('adm-locked');
+        $('h2', side).textContent = title;
+        const body = fresh('.adm-panel-body');
+        side.focus({ preventScroll: true });
+        return { body, alive: () => alive() && turnNow === panelTurn && !side.hidden };
+      },
+      close() {
+        if (side.hidden) return;
+        panelTurn += 1;
+        side.hidden = true;
+        shell.classList.remove('with-panel');
+        document.documentElement.classList.remove('adm-locked');
+        selected = '';
+        paintSelection();
+        if (opener?.isConnected) opener.focus({ preventScroll: true });
+      },
+    };
+
+    async function counts() {
+      const data = await send('/counts');
+      for (const id of COUNTED) {
+        const mark = $(`[data-tab="${id}"] b`, root);
+        if (!mark) continue;
+        mark.textContent = data[id];
+        mark.hidden = !data[id];
+      }
+      return data;
+    }
+
+    async function render({ keep = false } = {}) {
+      const id = ++turn;
+      cleanups.forEach((fn) => fn());
+      cleanups = [];
+      const [name, , section] = SECTIONS[tab];
+      $('.adm-head h1', root).textContent = name;
+      for (const b of $$('[data-tab]', root)) b.toggleAttribute('data-current', b.dataset.tab === tab);
+      $('[data-current]', root).scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      // после действия старый список остаётся на месте, пока не готов новый
+      const old = $('.adm-content', root);
+      const box = old.cloneNode(false);
+      if (!keep) {
+        box.innerHTML = loading;
+        old.replaceWith(box);
+      }
+      const ctx = {
+        box,
+        alive: () => alive() && id === turn,
+        onLeave: (fn) => cleanups.push(fn),
+        panel,
+        counts,
+        select: (key) => {
+          selected = key;
+          paintSelection();
+        },
+        open: (next) => go(next),
+        reload: () => render(),
+        // действие выполнено: карточка закрывается, список обновляется
+        done: () => {
+          panel.close();
+          render({ keep: true });
+        },
+      };
+      try {
+        await section(ctx);
+        if (!ctx.alive()) return;
+        if (keep) {
+          const at = window.scrollY;
+          old.replaceWith(box);
+          window.scrollTo(0, at);
+        }
+        paintSelection();
+      } catch (e) {
+        if (ctx.alive()) failed(keep ? old : box, e, () => render());
       }
     }
-    load();
-  };
-  queue.addEventListener('click', async (e) => {
-    const btn = e.target.closest('[data-action]');
-    if (!btn) return;
-    // Опасные действия — по второму нажатию.
-    if (['delete', 'ban'].includes(btn.dataset.action) && !btn.dataset.sure) {
-      btn.dataset.sure = '1';
-      btn.textContent = 'Точно?';
-      return;
+
+    function go(next) {
+      tab = next;
+      panel.close();
+      history.replaceState(history.state, '', `/admin?tab=${tab}`);
+      window.scrollTo(0, 0);
+      render();
     }
+
+    shell.addEventListener('click', (e) => {
+      const button = e.target.closest('[data-tab]');
+      if (button?.closest('.adm-nav')) go(button.dataset.tab);
+      if (e.target.closest('[data-refresh]')) {
+        panel.close();
+        render();
+      }
+      if (e.target.closest('.adm-panel-head [data-close]')) panel.close();
+      if (e.target.closest('[data-exit]')) {
+        access.key = '';
+        access.pass = '';
+        leave();
+        login();
+      }
+    });
+    // окна поверх карточки (причина, фото) закрываются своим Escape
+    const onKey = (e) => e.key === 'Escape' && !$('.sheet-wrap, .viewer') && panel.close();
+    const expired = () => {
+      access.pass = '';
+      leave();
+      login(true);
+    };
+    document.addEventListener('keydown', onKey);
+    addEventListener('tapty:admin-code', expired);
+    leave = () => {
+      turn += 1;
+      panelTurn += 1;
+      cleanups.forEach((fn) => fn());
+      cleanups = [];
+      document.removeEventListener('keydown', onKey);
+      removeEventListener('tapty:admin-code', expired);
+      document.documentElement.classList.remove('adm-locked');
+    };
+
+    counts().catch(() => {});
+    render();
+  }
+
+  onLeave(() => leave());
+  // вернулись в модерацию в этой же вкладке: ключ ещё помнится
+  if (access.key) {
     try {
-      await api(`/admin/${btn.dataset.id}`, { method: 'POST', body: { action: btn.dataset.action }, headers: headers() });
-      load();
-    } catch (err) {
-      toast(errorText(err));
+      await send('/counts');
+      if (alive()) panelView();
+      return;
+    } catch (e) {
+      if (!alive()) return;
+      if (e.code === 'code_required') return login(true);
     }
-  });
-  if (adminKey) load();
+  }
+  login();
 }

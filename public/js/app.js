@@ -22,6 +22,7 @@ import shop from './pages/shop.js';
 import myShop from './pages/myshop.js';
 import { footer } from './footer.js';
 import { promo } from './promo.js';
+import { maintenance } from './maintenance.js';
 import admin from './pages/admin.js';
 
 // Если сайт всё же открылся по http, переходим на защищённый адрес.
@@ -102,12 +103,13 @@ async function render({ restored = false } = {}) {
 
   document.documentElement.lang = lang();
   document.title = 'Tapty';
-  document.body.dataset.page = isItem ? 'item' : page === chatPage ? 'chat' : path === '/' ? 'home' : path === '/search' ? 'search' : '';
+  document.body.dataset.page = isItem ? 'item' : page === chatPage ? 'chat' : page === admin ? 'admin' : path === '/' ? 'home' : path === '/search' ? 'search' : '';
   chrome(tab);
   // В переписке полоса выдавила бы поле ввода за экран.
   promo.update(page !== chatPage && page !== admin);
   // В форме, профиле и модерации подвал только мешает.
   footer.update(![post, me, myShop, chats, chatPage, admin].includes(page));
+  maintenance.update(page !== admin);
 
   view.innerHTML = '';
   const restore = scroll.get(key) ?? 0;
@@ -192,5 +194,6 @@ addEventListener('beforeinstallprompt', (e) => {
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 
 render();
+maintenance.start();
 refreshUnread();
 syncFavorites();

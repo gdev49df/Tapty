@@ -4,6 +4,7 @@
 // солёный хеш этого ключа.
 import { LEGAL_VERSION } from '../public/js/catalog.js';
 import { deletePhotoFiles } from './photos.js';
+import { isBanned } from './bans.js';
 import { attempt, fail, json, limit, now, randomHex, readJson, safeEqual, sha256 } from './util.js';
 
 const LOGIN = /^[a-z0-9_.]{3,24}$/;
@@ -46,7 +47,8 @@ async function open(env, who, user, extra = {}) {
       env.DB.prepare('UPDATE listings SET owner = ? WHERE owner = ?').bind(user.id, who.owner),
       env.DB.prepare('UPDATE photos SET owner = ? WHERE owner = ?').bind(user.id, who.owner),
       // блокировка не должна сниматься регистрацией
-      env.DB.prepare('INSERT OR IGNORE INTO bans (value, created_at) SELECT ?, ? FROM bans WHERE value = ?').bind(user.id, now(), who.owner)
+      env.DB.prepare('INSERT OR IGNORE INTO bans (value, owner, until, created_at) SELECT ?1, ?1, until, ?2 FROM bans WHERE value = ?3')
+        .bind(user.id, now(), who.owner)
     );
   }
   await env.DB.batch(statements);
@@ -183,6 +185,6 @@ export async function signOut(env, who) {
 // Для действий, которые доступны только с аккаунтом и не заблокированным.
 export async function requireUser(env, who) {
   if (!who.user) fail(401, 'login_required');
-  if (await env.DB.prepare('SELECT 1 FROM bans WHERE value = ?').bind(who.owner).first()) fail(403, 'banned');
+  if (await isBanned(env, who.owner)) fail(403, 'banned');
   return who.user;
 }

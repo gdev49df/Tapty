@@ -2,29 +2,35 @@
 import { icon } from './icons.js';
 import { lang, t } from './i18n.js';
 import { $, esc } from './ui.js';
+import { config } from './api.js';
 
-// Адреса соцсетей tapty. Пока адреса нет, название показано без ссылки.
+// Адреса соцсетей и текст задаются в админке. Пока адреса нет, название показано без ссылки.
 const SOCIALS = [
-  ['Telegram', ''],
-  ['Instagram', ''],
+  ['Telegram', 'telegram'],
+  ['Instagram', 'instagram'],
 ];
 // чтобы выезд был заметен, а не сливался с первой отрисовкой страницы
 const DELAY = 250;
 
 let drawn = null;
 let closed = false;
+let site = null;
 
 function draw() {
   drawn = lang();
-  const names = SOCIALS.map(([name, url]) =>
-    url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${name}</a>` : `<span>${name}</span>`
-  );
+  const custom = site?.promo[drawn];
+  const names = SOCIALS.map(([name, key]) => {
+    const url = site?.social[key];
+    if (url) return `<a href="${esc(url)}" target="_blank" rel="noopener">${name}</a>`;
+    // после своего текста названия без ссылок ничего не говорят
+    return custom ? '' : `<span>${name}</span>`;
+  }).filter(Boolean);
   const root = $('#promo');
   root.innerHTML = `
     <div class="promo-clip">
       <div class="promo-row">
         <img src="/img/logo.webp" alt="" width="64" height="64">
-        <p>${esc(t('promoText'))} ${names.join(` ${esc(t('promoAnd'))} `)}</p>
+        <p>${esc(custom || t('promoText'))} ${names.join(` ${esc(t('promoAnd'))} `)}</p>
         <button type="button" aria-label="${esc(t('close'))}">${icon('close')}</button>
       </div>
     </div>`;
@@ -34,6 +40,13 @@ function draw() {
     root.classList.remove('open');
   });
 }
+
+config()
+  .then((value) => {
+    site = value;
+    if (drawn !== null && !closed) draw();
+  })
+  .catch(() => {});
 
 export const promo = {
   update(allowed) {

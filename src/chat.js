@@ -4,7 +4,6 @@ import { fail, json, limit, now, readJson } from './util.js';
 import { requireUser } from './auth.js';
 import { canReview } from './reviews.js';
 import { photoResponse, storePhoto } from './photos.js';
-import { banSeller } from './listings.js';
 
 const MAX = 1000;
 
@@ -314,12 +313,12 @@ export async function getChat(env, url, id, who) {
   });
 }
 
-export async function adminComplaints(env) {
+export async function complaints(env) {
   const { results } = await env.DB.prepare(
-    `SELECT k.id, k.chat_id, k.reporter, k.target, k.reason, k.comment, c.title, a.name AS author, b.name AS accused,
+    `SELECT k.id, k.chat_id, k.reporter, k.target, k.reason, k.comment, k.created_at, c.title, a.name AS author, b.name AS accused,
        EXISTS (SELECT 1 FROM bans WHERE value = k.target) AS banned
      FROM complaints k JOIN chats c ON c.id = k.chat_id JOIN users a ON a.id = k.reporter JOIN users b ON b.id = k.target
-     ORDER BY k.created_at DESC, k.id DESC LIMIT 20`
+     ORDER BY k.created_at DESC, k.id DESC LIMIT 50`
   ).all();
   const ids = [...new Set(results.map((r) => r.chat_id))];
   // последние 30 сообщений каждого диалога одним запросом
@@ -335,20 +334,20 @@ export async function adminComplaints(env) {
           .all()
       ).results
     : [];
-  return json({
-    items: results.map((r) => ({
-      id: r.id,
-      reason: r.reason,
-      comment: r.comment,
-      title: r.title,
-      author: r.author,
-      accused: r.accused,
-      banned: Boolean(r.banned),
-      messages: messages
-        .filter((m) => m.chat_id === r.chat_id)
-        .map((m) => ({ accused: m.sender === r.target, text: m.text, photo: m.photo })),
-    })),
-  });
+  return results.map((r) => ({
+    id: r.id,
+    at: r.created_at,
+    target: r.target,
+    reason: r.reason,
+    comment: r.comment,
+    title: r.title,
+    author: r.author,
+    accused: r.accused,
+    banned: Boolean(r.banned),
+    messages: messages
+      .filter((m) => m.chat_id === r.chat_id)
+      .map((m) => ({ accused: m.sender === r.target, text: m.text, photo: m.photo })),
+  }));
 }
 
 // Модератору доступны снимки только из тех диалогов, на которые пожаловались.
@@ -363,15 +362,9 @@ export async function adminChatPhoto(env, photo) {
   return response;
 }
 
-export async function adminComplaint(request, env, id) {
-  const { action } = await readJson(request);
-  const row = await env.DB.prepare('SELECT target FROM complaints WHERE id = ?').bind(id).first();
-  if (!row) fail(404, 'not_found');
-  if (action === 'ban') {
-    await banSeller(env, row.target);
-    await env.DB.prepare('DELETE FROM complaints WHERE target = ?').bind(row.target).run();
-  } else if (action === 'dismiss') {
-    await env.DB.prepare('DELETE FROM complaints WHERE id = ?').bind(id).run();
-  } else fail(400, 'invalid', 'action');
+// Жалобу отклоняют; нарушителя блокируют в разделе пользователей, и его жалобы закрываются сами.
+export async function adminComplaint(env, id) {
+  const done = await env.DB.prepare('DELETE FROM complaints WHERE id = ?').bind(id).run();
+  if (!done.meta.changes) fail(404, 'not_found');
   return json({ ok: true });
 }

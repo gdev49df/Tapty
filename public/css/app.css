@@ -82,8 +82,22 @@ h2 { font-size: 18px; line-height: 1.35; font-weight: 600; }
   #promo button { position: absolute; top: 50%; right: 16px; margin: -20px 0 0; }
 }
 
-/* включение входа по коду в модерации */
-.setup .my { display: flex; flex-direction: column; gap: 12px; }
+/* ---------- тех. работы ---------- */
+html.down { overflow: hidden; }
+#down { position: fixed; z-index: 60; inset: 0; display: flex; overflow: auto; padding: calc(24px + var(--safe-t)) 24px calc(24px + var(--safe-b)); background: var(--bg); text-align: center; }
+.down-body { display: flex; flex-direction: column; align-items: center; margin: auto; }
+.down-logo { width: min(72vw, 40dvh, 340px); height: auto; filter: drop-shadow(0 24px 28px rgba(20, 12, 40, .22)); }
+.down-word { width: 144px; height: auto; margin-top: 16px; }
+.down-body h1 { margin-top: 32px; font-size: 28px; }
+.down-body p { max-width: 36ch; margin-top: 8px; color: var(--muted); font-size: 16px; overflow-wrap: anywhere; }
+.down-body .btn { min-width: 200px; margin-top: 24px; }
+
+/* почему скрыто объявление */
+.item-info > .why { align-self: stretch; margin-top: 0; }
+.why { margin-top: 12px; padding: 12px 16px; background: var(--surface); border-radius: var(--r); overflow-wrap: anywhere; }
+.why p:first-child { font-weight: 500; }
+.why p + p { margin-top: 4px; color: var(--muted); }
+.why a { color: var(--accent-ink); text-decoration: underline; }
 
 /* ---------- нижнее меню ---------- */
 #tabs { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(5, 1fr); height: calc(var(--tabs) + var(--safe-b)); padding-bottom: var(--safe-b); background: var(--bg); border-top: 1px solid var(--line); }
@@ -344,10 +358,6 @@ body[data-page='item'] #view { padding: 0 0 32px; }
 .shop-note { font-weight: 600; }
 .shop-state .btn { margin-top: 8px; }
 .shop-form .field-hint { margin-top: -12px; }
-.shop-queue { margin-bottom: 32px; }
-.shop-queue .input { margin-top: 12px; }
-.shop-queue summary { margin-top: 16px; cursor: pointer; font-weight: 600; }
-.shop-queue details .my:first-of-type { padding-top: 16px; }
 .my-main > .avatar { width: 56px; height: 56px; border-radius: var(--r); }
 .account .menu + .menu { margin-top: 12px; }
 .same, .similar { margin-top: 40px; }
@@ -475,11 +485,6 @@ body[data-page='chat'] #view { padding-bottom: 0; }
 .chat-head .page-head { flex: 1; min-width: 0; }
 .chat-head > .icon-btn { margin-right: -12px; }
 .chat-closed { position: sticky; bottom: 0; display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 16px 0 calc(16px + var(--safe-b)); background: var(--bg); border-top: 1px solid var(--line); color: var(--muted); text-align: center; }
-.shop-queue h2 { margin-bottom: 12px; }
-.queue h2, .chat-queue h2, .review-queue h2 { margin: 24px 0 12px; }
-.log { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; overflow-wrap: anywhere; }
-.log .accused b { color: var(--error); }
-.log img { margin-top: 8px; max-height: 320px; border-radius: var(--r-s); }
 
 /* ---------- фото на весь экран ---------- */
 .viewer { position: fixed; z-index: 45; inset: 0; background: var(--bg); animation: fade .18s var(--ease); }

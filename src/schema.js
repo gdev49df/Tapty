@@ -25,7 +25,9 @@ const STATEMENTS = [
     expires_at INTEGER NOT NULL,
     old_price INTEGER NOT NULL DEFAULT 0,
     area TEXT NOT NULL DEFAULT '',
-    contacts INTEGER NOT NULL DEFAULT 0
+    contacts INTEGER NOT NULL DEFAULT 0,
+    hide_reason TEXT NOT NULL DEFAULT '',
+    ban_status TEXT NOT NULL DEFAULT ''
   )`,
   `CREATE INDEX IF NOT EXISTS listings_feed ON listings (status, bumped_at DESC)`,
   `CREATE INDEX IF NOT EXISTS listings_city ON listings (status, city, bumped_at DESC)`,
@@ -51,7 +53,8 @@ const STATEMENTS = [
     created_at INTEGER NOT NULL,
     PRIMARY KEY (listing_id, reporter)
   )`,
-  `CREATE TABLE IF NOT EXISTS bans (value TEXT PRIMARY KEY, created_at INTEGER NOT NULL)`,
+  // value — аккаунт или телефон; owner — аккаунт, из-за которого закрыт номер; until = 0 — бессрочно
+  `CREATE TABLE IF NOT EXISTS bans (value TEXT PRIMARY KEY, created_at INTEGER NOT NULL, until INTEGER NOT NULL DEFAULT 0, owner TEXT NOT NULL DEFAULT '')`,
   `CREATE TABLE IF NOT EXISTS rate (key TEXT PRIMARY KEY, count INTEGER NOT NULL, reset_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, username TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, login TEXT, pass_hash TEXT, pass_salt TEXT, rec_hash TEXT, rec_salt TEXT, consent_at INTEGER, consent_version TEXT)`,
   `CREATE TABLE IF NOT EXISTS sessions (hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at INTEGER NOT NULL)`,
@@ -82,6 +85,8 @@ const STATEMENTS = [
     state TEXT NOT NULL DEFAULT ''
   )`,
   `CREATE INDEX IF NOT EXISTS messages_chat ON messages (chat_id, id)`,
+  `CREATE INDEX IF NOT EXISTS messages_time ON messages (created_at)`,
+  `CREATE INDEX IF NOT EXISTS listings_new ON listings (created_at)`,
   `CREATE TABLE IF NOT EXISTS reviews (
     seller TEXT NOT NULL,
     author TEXT NOT NULL,
@@ -122,7 +127,8 @@ const STATEMENTS = [
     consent_at INTEGER,
     consent_version TEXT,
     created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    ban_status TEXT NOT NULL DEFAULT ''
   )`,
   // отклонённая заявка название не занимает
   `CREATE UNIQUE INDEX IF NOT EXISTS shops_name ON shops (name_key) WHERE status != 'rejected'`,
@@ -132,7 +138,13 @@ const STATEMENTS = [
 
 // Столбцы, которых нет в базах, созданных прежними версиями сайта.
 const COLUMNS = {
-  listings: { old_price: 'INTEGER NOT NULL DEFAULT 0', area: "TEXT NOT NULL DEFAULT ''", contacts: 'INTEGER NOT NULL DEFAULT 0' },
+  listings: {
+    old_price: 'INTEGER NOT NULL DEFAULT 0', area: "TEXT NOT NULL DEFAULT ''", contacts: 'INTEGER NOT NULL DEFAULT 0',
+    // почему скрыто (видно автору) и каким объявление было до блокировки
+    hide_reason: "TEXT NOT NULL DEFAULT ''", ban_status: "TEXT NOT NULL DEFAULT ''",
+  },
+  bans: { until: 'INTEGER NOT NULL DEFAULT 0', owner: "TEXT NOT NULL DEFAULT ''" },
+  shops: { ban_status: "TEXT NOT NULL DEFAULT ''" },
   users: {
     login: 'TEXT', pass_hash: 'TEXT', pass_salt: 'TEXT', rec_hash: 'TEXT', rec_salt: 'TEXT',
     // когда и какую редакцию оферты и согласия человек принял; у старых аккаунтов пусто

@@ -4,7 +4,7 @@ import { askDeleteListing } from '../dialogs.js';
 import { icon } from '../icons.js';
 import { lang, t } from '../i18n.js';
 import { store } from '../store.js';
-import { $, $$, cityName, cityOptions, dateText, errorText, esc, initial, pick, priceText, sheet, toast } from '../ui.js';
+import { $, $$, cityName, cityOptions, dateText, errorText, esc, hiddenWhy, initial, pick, priceText, sheet, toast } from '../ui.js';
 
 export default async function me({ root, alive, rerender }) {
   root.innerHTML = `
@@ -99,6 +99,7 @@ export default async function me({ root, alive, rerender }) {
             <span><strong>${esc(i.title)}</strong><b>${esc(priceText(i))}</b>
               <small class="st-${i.status}">${esc(state)}</small></span>
           </a>
+          ${i.status === 'hidden' ? hiddenWhy(i.hideReason) : ''}
           <dl class="my-stats">${[['eye', 'statViews', i.views], ['heart', 'statFavs', i.favs], ['phone', 'statContacts', i.contacts]]
             .map(([ic, key, n]) => `<div><dt>${esc(t(key))}</dt><dd>${icon(ic)}${n}</dd></div>`)
             .join('')}</dl>

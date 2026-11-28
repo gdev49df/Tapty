@@ -5,7 +5,7 @@ import { icon } from '../icons.js';
 import { adsCount, label, reviewsCount, t, viewsCount } from '../i18n.js';
 import { favorites } from '../favorites.js';
 import { openViewer } from '../viewer.js';
-import { $, $$, areaName, cardHtml, cityName, copyText, dateText, emptyState, errorText, esc, initial, money, phoneText, placeText, priceText, ratingText, sheet, shopBadge, shopLogo, sinceText, stars, toast, verifiedBadge, wasCheaper } from '../ui.js';
+import { $, $$, areaName, cardHtml, cityName, copyText, dateText, emptyState, errorText, esc, initial, money, phoneText, placeText, priceText, ratingText, sheet, shopBadge, shopLogo, sinceText, stars, toast, verifiedBadge, wasCheaper, hiddenWhy } from '../ui.js';
 
 export default async function itemPage({ root, params, alive, back, go, rerender }) {
   const id = Number(params[0]);
@@ -123,6 +123,7 @@ export default async function itemPage({ root, params, alive, back, go, rerender
         <div class="item-info">
           <nav class="crumbs" aria-label="breadcrumb"><a href="/">${esc(t('catalog'))}</a>${icon('next')}<a href="/search?cat=${item.category}&city=">${esc(label(category))}</a></nav>
           ${active ? '' : `<p class="status-note">${esc(t(`st_${item.status}`))}</p>`}
+          ${item.mine && item.status === 'hidden' ? hiddenWhy(item.hideReason) : ''}
           <div class="price-box">
             <p class="price-tag">${esc(priceText(item))}</p>
             ${t(item.priceType) === priceText(item) ? '' : `<span class="deal">${esc(t(item.priceType))}</span>`}

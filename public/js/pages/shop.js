@@ -4,6 +4,29 @@ import { icon } from '../icons.js';
 import { adsCount, reviewsCount, t } from '../i18n.js';
 import { $, cardHtml, cityName, copyText, emptyState, errorText, esc, phoneText, ratingText, shopBadge, shopLogo, sinceText, skeleton, stars, sheet, verifiedBadge } from '../ui.js';
 
+// Карточка магазина: на странице магазина и в предпросмотре у модератора.
+export function shopCard(shop, seller, ads, { reviewsAt = '', actions = '' } = {}) {
+  const place = [cityName(shop.city), shop.address].filter(Boolean).join(', ');
+  return `
+    <section class="shop-card">
+      <div class="shop-top">
+        ${shopLogo(shop)}
+        <div><h2>${esc(shop.name)}</h2>${shopBadge()}</div>
+      </div>
+      ${
+        seller.reviews && reviewsAt
+          ? `<a class="rating" href="${reviewsAt}">${stars(seller.rating)}<b>${esc(ratingText(seller.rating))}</b><span>${esc(reviewsCount(seller.reviews))}</span></a>`
+          : ''
+      }
+      ${seller.verified ? verifiedBadge() : ''}
+      <p class="desc">${esc(shop.about)}</p>
+      <p class="meta">${icon('pin')}${esc(place)}</p>
+      ${shop.hours ? `<p class="meta">${icon('clock')}${esc(shop.hours)}</p>` : ''}
+      <p class="muted small">${esc(sinceText(shop.since))} · ${esc(adsCount(ads))}</p>
+      ${actions}
+    </section>`;
+}
+
 export default async function shopPage({ root, params, alive, back }) {
   const id = Number(params[0]);
   root.innerHTML = `
@@ -26,28 +49,15 @@ export default async function shopPage({ root, params, alive, back }) {
   }
   if (!alive()) return;
   const { shop, seller, items } = data;
-  const place = [cityName(shop.city), shop.address].filter(Boolean).join(', ');
-  box.innerHTML = `
-    <section class="shop-card">
-      <div class="shop-top">
-        ${shopLogo(shop)}
-        <div><h2>${esc(shop.name)}</h2>${shopBadge()}</div>
-      </div>
-      ${
-        seller.reviews && items.length
-          ? `<a class="rating" href="/seller/${items[0].id}">${stars(seller.rating)}<b>${esc(ratingText(seller.rating))}</b><span>${esc(reviewsCount(seller.reviews))}</span></a>`
-          : ''
-      }
-      ${seller.verified ? verifiedBadge() : ''}
-      <p class="desc">${esc(shop.about)}</p>
-      <p class="meta">${icon('pin')}${esc(place)}</p>
-      ${shop.hours ? `<p class="meta">${icon('clock')}${esc(shop.hours)}</p>` : ''}
-      <p class="muted small">${esc(sinceText(shop.since))} · ${esc(adsCount(items.length))}</p>
+  const actions = `
       <div class="shop-actions">
         ${shop.mine ? `<a class="btn" href="/shop">${icon('edit')}${esc(t('edit'))}</a>` : `<button type="button" class="btn" data-call>${icon('phone')}${esc(t('shopPhoneShow'))}</button>`}
         <button type="button" class="btn ghost" data-share>${icon('share')}${esc(t('share'))}</button>
-      </div>
-    </section>
+      </div>`;
+  // с карточки магазина оценка ведёт к отзывам продавца
+  const reviewsAt = items.length ? `/seller/${items[0].id}` : '';
+  box.innerHTML = `
+    ${shopCard(shop, seller, items.length, { reviewsAt, actions })}
     ${items.length ? `<div class="grid">${items.map(cardHtml).join('')}</div>` : `<p class="muted">${esc(t('shopEmpty'))}</p>`}`;
 
   $('[data-share]', box).onclick = async () => {

@@ -6,13 +6,14 @@ import { deleteOrphans, deletePhotos } from './photos.js';
 import { SESSION_DAYS, requireUser } from './auth.js';
 import { rating, sellerReviews } from './reviews.js';
 import { needles, sameProduct, signature } from './same.js';
+import { isBanned } from './bans.js';
 
 const PAGE = 20;
 const HIDE_AFTER_REPORTS = 5;
 const CARD = 'id, title, price, price_type, city, area, district, condition, photos, bumped_at, old_price';
 const priced = (type) => type === 'fixed' || type === 'bargain';
 
-const parsePhotos = (row) => {
+export const parsePhotos = (row) => {
   try {
     return JSON.parse(row.photos);
   } catch {
@@ -34,7 +35,7 @@ const card = (row) => ({
   photo: parsePhotos(row)[0] || null,
 });
 
-const publicStatus = (row) =>
+export const publicStatus = (row) =>
   row.status === 'active' && row.expires_at <= now() ? 'expired' : row.status;
 
 const detail = (row) => ({
@@ -49,11 +50,12 @@ const detail = (row) => ({
   expiresAt: row.expires_at,
 });
 
-const own = (row) => ({
+export const own = (row) => ({
   ...detail(row),
   phone: row.phone,
   whatsapp: Boolean(row.whatsapp),
   telegram: row.telegram,
+  hideReason: row.hide_reason,
 });
 
 export async function listListings(env, url) {
@@ -221,7 +223,7 @@ export async function sellerAds(env, owner) {
 const shopOf = (env, owner) =>
   env.DB.prepare("SELECT id, name, NULLIF(logo, '') AS logo FROM shops WHERE owner = ? AND status = 'approved'").bind(owner).first();
 
-async function findRow(env, id) {
+export async function findRow(env, id) {
   const row = await env.DB.prepare('SELECT * FROM listings WHERE id = ?').bind(id).first();
   if (!row) fail(404, 'not_found');
   return row;
@@ -236,6 +238,8 @@ async function findOwn(env, id, owner) {
 export async function getListing(env, ctx, id, { owner, ip }) {
   const row = await findRow(env, id);
   const mine = owner === row.owner;
+  // причину скрытия видит только автор
+  const why = mine && row.status === 'hidden' ? { hideReason: row.hide_reason } : {};
   if (row.status === 'hidden' && !mine) fail(404, 'not_found');
   if (!mine) {
     ctx.waitUntil(
@@ -247,7 +251,7 @@ export async function getListing(env, ctx, id, { owner, ip }) {
   const [seller, same, shop] = await Promise.all([sellerInfo(env, row.owner), sameItems(env, row), shopOf(env, row.owner)]);
   const more = await similar(env, row, new Set(same.map((i) => i.id)));
   // Сам номер отдаётся только по нажатию «Связаться». Написать в чат можно только продавцу с аккаунтом.
-  return json({ item: { ...detail(row), mine, chat: row.owner.startsWith('u:') }, seller: { ...seller, shop }, same, similar: more });
+  return json({ item: { ...detail(row), ...why, mine, chat: row.owner.startsWith('u:') }, seller: { ...seller, shop }, same, similar: more });
 }
 
 // Номер для звонка виден всем, а ссылки, чтобы написать, — только вошедшим.
@@ -347,8 +351,7 @@ async function checkPhotos(env, ids, owner, listingId) {
 }
 
 async function checkSeller(env, owner, phone, exceptId) {
-  const banned = await env.DB.prepare('SELECT 1 FROM bans WHERE value IN (?, ?)').bind(owner, phone).first();
-  if (banned) fail(403, 'banned');
+  if (await isBanned(env, owner, phone)) fail(403, 'banned');
   const { total } = await env.DB.prepare(
     "SELECT COUNT(*) AS total FROM listings WHERE phone = ? AND status = 'active' AND expires_at > ? AND id != ?"
   )
@@ -464,48 +467,6 @@ export async function reportListing(request, env, id, { ip }) {
     await env.DB.prepare("UPDATE listings SET status = 'hidden' WHERE id = ?").bind(id).run();
   }
   return json({ ok: true });
-}
-
-export async function adminReports(env) {
-  const { results } = await env.DB.prepare(
-    `SELECT l.*, COUNT(r.reporter) AS total, GROUP_CONCAT(r.reason) AS reasons
-     FROM listings l LEFT JOIN reports r ON r.listing_id = l.id
-     GROUP BY l.id HAVING total > 0 OR l.status = 'hidden'
-     ORDER BY total DESC, l.id DESC LIMIT 40`
-  ).all();
-  return json({ items: results.map((r) => ({ ...own(r), reports: r.total, reasons: r.reasons || '' })) });
-}
-
-export async function adminAction(request, env, id) {
-  const { action } = await readJson(request);
-  const row = await findRow(env, id);
-  if (action === 'hide') {
-    await env.DB.prepare("UPDATE listings SET status = 'hidden', approved = 0 WHERE id = ?").bind(id).run();
-  } else if (action === 'approve') {
-    await env.DB.batch([
-      env.DB.prepare("UPDATE listings SET status = 'active', approved = 1 WHERE id = ?").bind(id),
-      env.DB.prepare('DELETE FROM reports WHERE listing_id = ?').bind(id),
-    ]);
-  } else if (action === 'delete') {
-    await removeRow(env, row);
-  } else if (action === 'ban') {
-    await banSeller(env, row.owner, row.phone);
-  } else fail(400, 'invalid', 'action');
-  return json({ ok: true });
-}
-
-// Блокируются аккаунт и номера из его объявлений, объявления скрываются.
-export async function banSeller(env, owner, phone = '') {
-  const t = now();
-  await env.DB.batch([
-    env.DB.prepare('INSERT OR IGNORE INTO bans (value, created_at) VALUES (?, ?)').bind(owner, t),
-    env.DB.prepare('INSERT OR IGNORE INTO bans (value, created_at) SELECT DISTINCT phone, ? FROM listings WHERE owner = ?').bind(t, owner),
-    env.DB.prepare("INSERT OR IGNORE INTO bans (value, created_at) SELECT ?1, ?2 WHERE ?1 != ''").bind(phone, t),
-    env.DB.prepare("UPDATE listings SET status = 'hidden', approved = 0 WHERE owner = ?1 OR phone = ?2").bind(owner, phone),
-    env.DB.prepare(
-      "UPDATE shops SET status = 'closed', note = 'Аккаунт заблокирован', updated_at = ?, rev = rev + 1 WHERE owner = ? AND status != 'closed'"
-    ).bind(t, owner),
-  ]);
 }
 
 // Фоновая уборка понемногу: черновые фото, старые счётчики, давно закрытые объявления.

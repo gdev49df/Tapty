@@ -6,6 +6,7 @@ import { DAY, fail, json, limit, normalizeText, now, readJson } from './util.js'
 import { requireUser } from './auth.js';
 import { deletePhotos } from './photos.js';
 import { sellerAds, sellerInfo } from './listings.js';
+import { isBanned } from './bans.js';
 
 // Одно и то же название с другими пробелами, точками или регистром считается занятым.
 const nameKey = (name) => normalizeText(name).replace(/[^\p{L}\p{N}]/gu, '');
@@ -63,7 +64,7 @@ export async function saveShop(request, env, who) {
   await requireUser(env, who);
   const data = validate(body);
   const { owner, ip } = who;
-  if (await env.DB.prepare('SELECT 1 FROM bans WHERE value = ?').bind(data.phone).first()) fail(403, 'banned');
+  if (await isBanned(env, data.phone)) fail(403, 'banned');
   const old = await findByOwner(env, owner);
   if (old?.status === 'closed') fail(403, 'shop_closed');
   if (old?.status === 'approved' && data.name !== old.name) fail(400, 'shop_name_locked', 'shopName');
@@ -155,25 +156,31 @@ export async function shopContact(env, id, { ip }) {
   return json({ phone: row.phone });
 }
 
+// Одна строка списка модератора: заявка и сведения о том, кто её подал.
+const MODERATED = `SELECT s.*, u.login, u.name AS person,
+  (SELECT COUNT(*) FROM listings l WHERE l.owner = s.owner AND l.status = 'active' AND l.expires_at > ?) AS ads
+  FROM shops s LEFT JOIN users u ON u.id = s.owner`;
+const moderated = (r) => ({ ...own(r), rev: r.rev, owner: r.owner, login: r.login, person: r.person, ads: r.ads });
+
 export async function adminShops(env) {
-  const select = (where, order) =>
-    env.DB.prepare(
-      `SELECT s.*, u.login, u.name AS person,
-         (SELECT COUNT(*) FROM listings l WHERE l.owner = s.owner AND l.status = 'active' AND l.expires_at > ?) AS ads
-       FROM shops s LEFT JOIN users u ON u.id = s.owner WHERE ${where} ORDER BY ${order} LIMIT 50`
-    )
-      .bind(now())
-      .all();
-  const [waiting, decided] = await Promise.all([
+  const select = (where, order) => env.DB.prepare(`${MODERATED} WHERE ${where} ORDER BY ${order} LIMIT 50`).bind(now()).all();
+  const [waiting, decided, rejected] = await Promise.all([
     // заявки — в порядке поступления
     select("s.status = 'pending'", 's.updated_at, s.id'),
     select("s.status IN ('approved', 'closed')", 's.updated_at DESC, s.id DESC'),
+    select("s.status = 'rejected'", 's.updated_at DESC, s.id DESC'),
   ]);
-  return json({
-    items: [...waiting.results, ...decided.results].map((r) => ({ ...own(r), rev: r.rev, login: r.login, person: r.person, ads: r.ads })),
-  });
+  return json({ items: [...waiting.results, ...decided.results, ...rejected.results].map(moderated) });
 }
 
+// Как магазин увидят покупатели: открывается и до одобрения.
+export async function adminShopPreview(env, id) {
+  const row = await env.DB.prepare(`${MODERATED} WHERE s.id = ?`).bind(now(), id).first();
+  if (!row) fail(404, 'not_found');
+  const [info, items] = await Promise.all([sellerInfo(env, row.owner), sellerAds(env, row.owner)]);
+  const { rating, reviews, verified, count } = info;
+  return json({ shop: moderated(row), seller: { rating, reviews, verified, count }, items });
+}
 // действие: из какого статуса и в какой
 const MOVES = { approve: ['pending', 'approved'], reject: ['pending', 'rejected'], close: ['approved', 'closed'], reopen: ['closed', 'approved'] };
 
@@ -185,7 +192,7 @@ export async function adminShop(request, env, id) {
   if (to !== 'approved' && !reason) fail(400, 'invalid', 'note');
   // rev — та редакция заявки, которую видел модератор: изменённую после этого он не откроет вслепую
   const done = await env.DB.prepare(
-    'UPDATE shops SET status = ?, note = ?, updated_at = ?, rev = rev + 1 WHERE id = ? AND status = ? AND rev = ?'
+    "UPDATE shops SET status = ?, note = ?, ban_status = '', updated_at = ?, rev = rev + 1 WHERE id = ? AND status = ? AND rev = ?"
   )
     .bind(to, reason, now(), id, from, Number(rev))
     .run();
